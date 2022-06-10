@@ -16,7 +16,8 @@ typedef double pixel_precision; // the type of values in the image, e.g., float,
 typedef func_byreference_t<func_precision, grid_precision, grid_dimension, CudaMatrix<pixel_precision>, CudaMatrix<pixel_precision> > image_err_func_byref;
 
 // create device function pointer for by-reference kernel function here
-__device__ image_err_func_byref dev_func_byref_ptr = averageAbsoluteDifference<func_precision, grid_precision, grid_dimension, pixel_precision>;
+//__device__ image_err_func_byref dev_func_byref_ptr = averageAbsoluteDifference<func_precision, grid_precision, grid_dimension, pixel_precision>;
+__device__ image_err_func_byref dev_func_byref_ptr = sumOfAbsoluteDifferences<func_precision, grid_precision, grid_dimension, pixel_precision>;
 
 // test grid search
 // classes typically store images in column major format so the images
