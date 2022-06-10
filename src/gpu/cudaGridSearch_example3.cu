@@ -2,6 +2,7 @@
 #define CUDAFUNCTION __host__ __device__
 
 #include <cmath>
+//#include <cstdlib>
 #include <iostream>
 
 #include "cudaImage.cuh"
@@ -13,11 +14,11 @@ typedef float grid_precision;   // the type of values in the grid, e.g., float, 
 typedef float func_precision;   // the type of values taken by the error function, e.g., float, double, int, etc.
 typedef double pixel_precision; // the type of values in the image, e.g., float, double, int, etc.
 
-typedef func_byreference_t<func_precision, grid_precision, grid_dimension, CudaImage<pixel_precision>, CudaImage<pixel_precision> > image_err_func_byref;
+typedef func_byvalue_t<func_precision, grid_precision, grid_dimension, CudaImage<pixel_precision>, CudaImage<pixel_precision> > image_err_func_byvalue;
 
-// create device function pointer for by-reference kernel function here
-//__device__ image_err_func_byref dev_func_byref_ptr = averageAbsoluteDifference<func_precision, grid_precision, grid_dimension, pixel_precision>;
-__device__ image_err_func_byref dev_func_byref_ptr = sumOfAbsoluteDifferences<func_precision, grid_precision, grid_dimension, pixel_precision>;
+// create device function pointer for by-value kernel function here
+__device__ image_err_func_byvalue dev_func_byvalue_ptr = averageAbsoluteDifference<func_precision, grid_precision, grid_dimension, pixel_precision>;
+//__device__ image_err_func_byvalue dev_func_byvalue_ptr = sumOfAbsoluteDifferences<func_precision, grid_precision, grid_dimension, pixel_precision>;
 
 // test grid search
 // classes typically store images in column major format so the images
@@ -45,7 +46,7 @@ pixel_precision imageC_data[6 * 6] = {1, 1, 0, 0, 0, 0,
 };
 
 int main(int argc, char **argv) {
-    image_err_func_byref host_func_byref_ptr;
+    image_err_func_byvalue host_func_byval_ptr;
 
     int cuda_device = 0;
     cudaDeviceProp deviceProp;
@@ -74,8 +75,8 @@ int main(int argc, char **argv) {
 
     std::vector<grid_precision> start_point = {(grid_precision) -m2._width / 2, (grid_precision) -m2._height / 2};
     std::vector<grid_precision> end_point = {(grid_precision) std::abs(m1._width - (m2._width / 2)),
-                                             (grid_precision) std::abs(m1._height - (m2._height / 2))};
-    std::vector<grid_precision> resolution = {(grid_precision) 1.0f, (grid_precision) 1.0f};
+                                  (grid_precision) std::abs(m1._height - (m2._height / 2))};
+    std::vector<grid_precision> resolution = {(grid_precision) 0.5f, (grid_precision) 0.5f};
 
     CudaGrid<grid_precision> translation_xy_grid(grid_dimension);
     ck(cudaMalloc(&translation_xy_grid.data(), translation_xy_grid.bytesSize()));
@@ -89,20 +90,12 @@ int main(int argc, char **argv) {
     // second template argument is the grid point value type
     CudaGridSearcher<func_precision, grid_precision> translation_xy_gridsearcher(translation_xy_grid);
 
-    CudaImage<pixel_precision> *d_m1, *d_m2;
-    ck(cudaMalloc((void **) &d_m1, sizeof(CudaImage<pixel_precision>)));
-    ck(cudaMalloc((void **) &d_m2, sizeof(CudaImage<pixel_precision>)));
-    cudaMemcpy(d_m1, &m1, sizeof(CudaImage<pixel_precision>), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_m2, &m2, sizeof(CudaImage<pixel_precision>), cudaMemcpyHostToDevice);
+    // Copy device function pointer for the function having by-value parameters to host side
+    cudaMemcpyFromSymbol(&host_func_byval_ptr, dev_func_byvalue_ptr,
+                         sizeof(image_err_func_byvalue));
 
-    // Copy device function pointer for the function having by-reference parameters to host side
-    cudaMemcpyFromSymbol(&host_func_byref_ptr, dev_func_byref_ptr,
-                         sizeof(image_err_func_byref));
-
-    translation_xy_gridsearcher.search_by_reference(host_func_byref_ptr, d_m1, d_m2);
-
-    ck(cudaFree(d_m1));
-    ck(cudaFree(d_m2));
+    //translation_xy_gridsearcher.search(host_func_byval_ptr, m1, m2);
+    translation_xy_gridsearcher.search_by_value(host_func_byval_ptr, m1, m2);
 
     // Clean memory
     ck(cudaFree(m1._data));

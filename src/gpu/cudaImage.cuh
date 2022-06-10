@@ -70,20 +70,6 @@ struct CudaMatrix {
         return ((int) y) * _width + (int) x;
     }
 
-    CUDAFUNCTION bool inImage(float x, float y) const {
-        if (x >= 0 && y >= 0 && x < _width && y < _height)
-            return true;
-        return false;
-    }
-
-    CUDAFUNCTION float valueAt(float x, float y) const {
-        return valueAt_nearest_neighbor(x, y);
-    }
-
-    CUDAFUNCTION float valueAt_nearest_neighbor(float x, float y) const {
-        return (inImage(x, y)) ? _data[toIndex(x, y)] : cuda::std::numeric_limits<float>::infinity();
-    }
-
     uint32_t bytesSize() const {
         return size() * sizeof(precision);
     }
@@ -99,7 +85,7 @@ struct CudaMatrix {
     template<typename T>
     CudaMatrix transform(const CudaMatrix &A, T fn);
 
-    //CudaMatrix &operator=(CudaMatrix m);
+//    CudaMatrix &operator=(CudaMatrix m);
 
     CudaMatrix operator+=(const CudaMatrix &m) {
         return transform(m, [=] __device__(precision x, precision y) { return x + y; });
@@ -123,6 +109,36 @@ struct CudaImage : public CudaMatrix<precision> {
     CUDAFUNCTION ~CudaImage() {
     }
 
+    CUDAFUNCTION bool inImage(float x, float y) const {
+        if (x >= 0 && y >= 0 && x < this->_width && y < this->_height)
+            return true;
+        return false;
+    }
+
+    CUDAFUNCTION float valueAt(float x, float y) const {
+        //return valueAt_nearest_neighbor(x, y);
+        return valueAt_bilinear(x, y);
+    }
+
+    CUDAFUNCTION float valueAt_nearest_neighbor(float x, float y) const {
+        return (this->inImage(x, y)) ? this->_data[this->toIndex(x, y)] : cuda::std::numeric_limits<float>::infinity();
+    }
+
+    CUDAFUNCTION float valueAt_bilinear(float x, float y) const {
+        if (this->inImage(x,y)) {
+            float tlc = this->_data[this->toIndex(floor(x), floor(y))];
+            float trc = this->_data[this->toIndex(ceil(x), floor(y))];
+            float blc = this->_data[this->toIndex(floor(x), ceil(y))];
+            float brc = this->_data[this->toIndex(ceil(x), ceil(y))];
+            float alpha_x = x - floor(x);
+            float alpha_y = y - floor(y);
+            float value_top = (1.0f - alpha_x)*tlc + alpha_x*trc;
+            float value_bottom = (1.0f - alpha_x)*blc + alpha_x*brc;
+            float value = (1.0f - alpha_y)*value_top + alpha_y*value_bottom;
+            return value;
+        }
+        return cuda::std::numeric_limits<float>::infinity();
+    }
 };
 
 template<typename precision>

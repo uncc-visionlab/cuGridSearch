@@ -35,6 +35,12 @@ add_executable(cudaGridSearch_example2
 target_compile_options(cudaGridSearch_example2 PUBLIC --extended-lambda)
 target_link_libraries(cudaGridSearch_example2 ${CUDA_LIBRARIES})
 
+add_executable(cudaGridSearch_example3
+        cudaGridSearch_example3.cu
+        cudaImageOps.cu cudaErrorFunctions.cuh)
+target_compile_options(cudaGridSearch_example3 PUBLIC --extended-lambda)
+target_link_libraries(cudaGridSearch_example3 ${CUDA_LIBRARIES})
+
 if (Matlab_FOUND)
     include_directories(
         ${Matlab_INCLUDE_DIRS}

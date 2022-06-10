@@ -30,7 +30,7 @@ typedef float grid_precision;   // the type of values in the grid, e.g., float, 
 typedef float func_precision;   // the type of values taken by the error function, e.g., float, double, int, etc.
 typedef float pixel_precision; // the type of values in the image, e.g., float, double, int, etc.
 
-typedef func_byvalue_t<func_precision, grid_precision, grid_dimension, CudaMatrix<pixel_precision>, CudaMatrix<pixel_precision> > image_err_func_byvalue;
+typedef func_byvalue_t<func_precision, grid_precision, grid_dimension, CudaImage<pixel_precision>, CudaImage<pixel_precision> > image_err_func_byvalue;
 
 // create device function pointer for by-value kernel function here
 //__device__ image_err_func_byvalue dev_func_byvalue_ptr = averageAbsoluteDifference<func_precision, grid_precision, grid_dimension, pixel_precision>;
@@ -117,8 +117,8 @@ int main(int argc, char **argv) {
 //    cudaCheckErrors("copyImageXYToDevice::cudaMalloc image.values() failed.");
 //    cudaCheckErrors("copyImageXYToDevice::cudaMemcpy image.values() failed.");
 
-    CudaMatrix<pixel_precision> m1(6, 6);
-    CudaMatrix<pixel_precision> m2(6, 6);
+    CudaImage<pixel_precision> m1(6, 6);
+    CudaImage<pixel_precision> m2(6, 6);
 
     ck(cudaMalloc(&m1._data, m1.bytesSize()));
     ck(cudaMalloc(&m2._data, m2.bytesSize()));
