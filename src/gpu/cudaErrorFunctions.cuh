@@ -70,10 +70,10 @@ template<typename func_precision, typename grid_precision, unsigned int D, typen
 CUDAFUNCTION func_precision
 averageAbsoluteDifference(nv_ext::Vec<grid_precision, D> &t, CudaMatrix<pixType> *img_moved, CudaMatrix<pixType> *img_fixed) {
     int num_errors = 0;
-    printf("img_moved ptr %p\n", img_moved);
-    printf("img_fixed ptr %p\n", img_fixed);
-    printf("img_moved data ptr %p\n", img_moved->_data);
-    printf("img_fixed data ptr %p\n", img_fixed->_data);
+//    printf("img_moved ptr %p\n", img_moved);
+//    printf("img_fixed ptr %p\n", img_fixed);
+//    printf("img_moved data ptr %p\n", img_moved->_data);
+//    printf("img_fixed data ptr %p\n", img_fixed->_data);
     float sum_of_absolute_differences = 0;
     for (int x = 0; x < img_fixed->width(); x++) {
         for (int y = 0; y < img_fixed->height(); y++) {
@@ -84,17 +84,17 @@ averageAbsoluteDifference(nv_ext::Vec<grid_precision, D> &t, CudaMatrix<pixType>
             }
         }
     }
-    printf("evalXY_by_reference(%0.2f,%0.2f) exiting.\n", (float) t[0], (float) t[1]);
+//    printf("evalXY_by_reference(%0.2f,%0.2f) exiting.\n", (float) t[0], (float) t[1]);
     return (func_precision) sum_of_absolute_differences / num_errors;
 }
 
 template<typename func_precision, typename grid_precision, unsigned int D, typename pixType>
 CUDAFUNCTION func_precision
 sumOfAbsoluteDifferences(nv_ext::Vec<grid_precision, D> &t, CudaMatrix<pixType> *img_moved, CudaMatrix<pixType> *img_fixed) {
-    printf("img_moved ptr %p\n", img_moved);
-    printf("img_fixed ptr %p\n", img_fixed);
-    printf("img_moved data ptr %p\n", img_moved->_data);
-    printf("img_fixed data ptr %p\n", img_fixed->_data);
+//    printf("img_moved ptr %p\n", img_moved);
+//    printf("img_fixed ptr %p\n", img_fixed);
+//    printf("img_moved data ptr %p\n", img_moved->_data);
+//    printf("img_fixed data ptr %p\n", img_fixed->_data);
     float sum_of_absolute_differences = 0;
     for (int x = 0; x < img_fixed->width(); x++) {
         for (int y = 0; y < img_fixed->height(); y++) {
@@ -104,7 +104,7 @@ sumOfAbsoluteDifferences(nv_ext::Vec<grid_precision, D> &t, CudaMatrix<pixType> 
             }
         }
     }
-    printf("evalXY_by_reference(%0.2f,%0.2f) exiting.\n", (float) t[0], (float) t[1]);
+//    printf("evalXY_by_reference(%0.2f,%0.2f) exiting.\n", (float) t[0], (float) t[1]);
     return (func_precision) sum_of_absolute_differences;
 }
 

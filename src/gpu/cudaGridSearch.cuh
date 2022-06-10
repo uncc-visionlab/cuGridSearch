@@ -49,13 +49,15 @@ struct CudaGrid : private CudaMatrix<precision> {
     }
 
     void getAxisSampleCounts(precision *axis_sample_counts) {
-        cudaMemcpy(axis_sample_counts, this->axis_sample_count(), _dimensions * sizeof(precision), cudaMemcpyDeviceToHost);
+        cudaMemcpy(axis_sample_counts, this->axis_sample_count(), _dimensions * sizeof(precision),
+                   cudaMemcpyDeviceToHost);
     }
 
     int numElements() {
         precision axis_sample_counts[_dimensions];
         int32_t total_size = 1;
-        cudaMemcpy(&axis_sample_counts, this->axis_sample_count(), _dimensions * sizeof(precision), cudaMemcpyDeviceToHost);
+        cudaMemcpy(&axis_sample_counts, this->axis_sample_count(), _dimensions * sizeof(precision),
+                   cudaMemcpyDeviceToHost);
         for (int axis = 0; axis < _dimensions; axis++) {
             total_size = total_size * axis_sample_counts[axis];
         }
@@ -120,7 +122,7 @@ struct CudaGrid : private CudaMatrix<precision> {
     }
 
     template<typename T>
-    __device__ void indexToGridPoint(T index, precision* grid_point) {
+    __device__ void indexToGridPoint(T index, precision *grid_point) {
         precision *resolutionArr = resolution();
         precision *start_pointArr = start_point();
         precision *axis_sample_countArr = axis_sample_count();
@@ -132,7 +134,7 @@ struct CudaGrid : private CudaMatrix<precision> {
             dimensional_increments[axis] = axis_sample_countArr[axis - 1] * dimensional_increments[axis - 1];
         }
 
-        for (int axis = _dimensions - 1; axis >= 0; axis++) {
+        for (int axis = _dimensions - 1; axis >= 0; axis--) {
             axis_sample_indices[axis] = ((int) index / dimensional_increments[axis]);
             assert(axis_sample_indices[axis] >= 0);
             index -= axis_sample_indices[axis] * dimensional_increments[axis];
@@ -214,12 +216,14 @@ __global__ void evaluationKernel_by_value(CudaGrid<grid_precision> grid,
                                           Types ... arg_vals) {
     int offset = (blockDim.x * blockIdx.x + threadIdx.x);
     grid_precision *grid_point = new grid_precision[D];
-//    grid.indexToGridPoint(offset, grid_point);
-//    gridpt[0] = grid_point[0];
-//    gridpt[1] = grid_point[1];
-    gridpt[0] = gridpt[1] = 0;
+//    printf("index = %d ", offset);
+    grid.indexToGridPoint(offset, grid_point);
+    gridpt[0] = grid_point[0];
+    gridpt[1] = grid_point[1];
+//    printf("gridpt(%d,%d)\n", (int) grid_point[0], (int) grid_point[1]);
+//    gridpt[0] = gridpt[1] = 0;
     *(result + offset) = (*op)(gridpt, arg_vals...);
-    printf("func_byvalue_t %p setting gridvalue[%d] = %f\n", *op, offset, *(result + offset));
+//    printf("func_byvalue_t %p setting gridvalue[%d] = %f\n", *op, offset, *(result + offset));
     delete[] grid_point;
 }
 
@@ -234,12 +238,14 @@ __global__ void evaluationKernel_by_reference(CudaGrid<grid_precision> grid,
                                               Types *... arg_ptrs) {
     int offset = (blockDim.x * blockIdx.x + threadIdx.x);
     grid_precision *grid_point = new grid_precision[D];
-    //grid.indexToGridPoint(offset, grid_point);
-    //gridpt[0] = grid_point[0];
-    //gridpt[1] = grid_point[1];
-    gridpt[0] = gridpt[1] = 0;
+//    printf("index = %d ", offset);
+    grid.indexToGridPoint(offset, grid_point);
+    gridpt[0] = grid_point[0];
+    gridpt[1] = grid_point[1];
+//    printf("gridpt(%d,%d)\n", (int) grid_point[0], (int) grid_point[1]);
+//    gridpt[0] = gridpt[1] = 0;
     *(result + offset) = (*op)(gridpt, arg_ptrs...);
-    printf("func_byreference_t %p setting gridvalue[%d] = %f\n", *op, offset, *(result + offset));
+//    printf("func_byreference_t %p setting gridvalue[%d] = %f\n", *op, offset, *(result + offset));
     delete[] grid_point;
 }
 
@@ -285,10 +291,8 @@ struct CudaGridSearcher {
         ck(cudaMalloc(&grid_values._data, grid_values.bytesSize()));
         grid_values.fill(0);
 
-        evaluationKernel_by_value<<<1, 1>>>(*_grid, grid_values._data, errorFunction,
+        evaluationKernel_by_value<<< gridDim, blockDim>>>(*_grid, grid_values._data, errorFunction,
                                             pt, arg_vals...);
-//        evaluationKernel_by_value<<<gridDim, blockDim>>>(*_grid, grid_values._data, errorFunction,
-//                                                         pt, arg_vals...);
         cudaDeviceSynchronize();
 
         grid_values.display();
@@ -322,10 +326,8 @@ struct CudaGridSearcher {
         ck(cudaMalloc(&grid_values._data, grid_values.bytesSize()));
         grid_values.fill(0);
 
-        evaluationKernel_by_reference<<<1, 1>>>(*_grid, grid_values._data, errorFunction,
+        evaluationKernel_by_reference<<< gridDim, blockDim>>>(*_grid, grid_values._data, errorFunction,
                                                 pt, arg_ptrs...);
-//        evaluationKernel_by_reference<<<gridDim, blockDim>>>(*_grid, grid_values._data, errorFunction,
-//                                                             pt, arg_ptrs...);
         cudaDeviceSynchronize();
 
         grid_values.display();

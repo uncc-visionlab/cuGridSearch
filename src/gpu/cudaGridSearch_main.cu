@@ -125,7 +125,7 @@ int main(int argc, char **argv) {
     // Test here
 
     m1.setValuesFromVector(std::vector<pixel_precision>(imageA_data, imageA_data + 6 * 6));
-    m2.setValuesFromVector(std::vector<pixel_precision>(imageB_data, imageB_data + 6 * 6));
+    m2.setValuesFromVector(std::vector<pixel_precision>(imageA_data, imageA_data + 6 * 6));
 //    m1.fill(5);
 //    m2.fill(10);
 
