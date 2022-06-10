@@ -69,7 +69,7 @@ CudaMatrix<precision> CudaMatrix<precision>::transform(const CudaMatrix &A, T fn
     assert(_width == A._width);
     assert(_height == A._height);
 
-    transformProcess << < numBlock, threadsPerBlock >>>(*this, A, fn);
+    transformProcess <<< numBlock, threadsPerBlock >>>(*this, A, fn);
 
     return *this;
 }
@@ -90,7 +90,7 @@ void CudaMatrix<precision>::fill(precision value) {
     // thrust::device_ptr<precision> thrustPtr = thrust::device_pointer_cast(_data);
     // thrust::uninitialized_fill(thrustPtr, thrustPtr + size(), value);
 
-    fillProcess << < numBlock, threadsPerBlock >>>(*this, value);
+    fillProcess <<< numBlock, threadsPerBlock >>>(*this, value);
 }
 
 template<typename precision>

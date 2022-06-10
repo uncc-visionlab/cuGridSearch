@@ -137,16 +137,15 @@ struct CudaVector : public CudaMatrix<precision> {
     CUDAFUNCTION ~CudaVector() {
     }
 
-    CUDAFUNCTION precision &at(int row) const {
-        return at(1, row);
-    }
-
     template<typename T>
-    CUDAFUNCTION int toIndex(T row) const {
+    CUDAFUNCTION int toIndex(T column_index) const {
         // column-major ordering of _data
-        return toIndex(1, row);
+        return toIndex(column_index, 0);
     }
 
+    CUDAFUNCTION precision &at(int column_index) const {
+        return this->CudaMatrix<precision>::at(column_index, 0);
+    }
 };
 
 #endif /* CUDAIMAGE_CUH */
