@@ -15,8 +15,8 @@
  * @param matrix - The matrix to set the value to
  * @param value - The value to set
  */
-template <typename precision>
-__global__ void fillProcess(CudaImage<precision> matrix, precision value) {
+template<typename precision>
+__global__ void fillProcess(CudaMatrix<precision> matrix, precision value) {
     int x = blockDim.x * blockIdx.x + threadIdx.x;
 
     if (x >= matrix.size()) {
@@ -35,10 +35,10 @@ __global__ void fillProcess(CudaImage<precision> matrix, precision value) {
  * @param B - The matrix B to compute the result from
  * @param transform - The function to apply on each A'elements such as A(i) = transform(A(i), B(i))
  */
-template <typename precision, typename T>
-__global__ void transformProcess(CudaImage<precision> A,
-        CudaImage<precision> B,
-        T transform) {
+template<typename precision, typename T>
+__global__ void transformProcess(CudaMatrix<precision> A,
+                                 CudaMatrix<precision> B,
+                                 T transform) {
     int x = blockDim.x * blockIdx.x + threadIdx.x;
 
     if (x >= A.size()) {
@@ -60,8 +60,9 @@ __global__ void transformProcess(CudaImage<precision> A,
  *
  * @return This
  */
-template<typename precision> template<typename T>
-CudaImage<precision> CudaImage<precision>::transform(const CudaImage &A, T fn) {
+template<typename precision>
+template<typename T>
+CudaMatrix<precision> CudaMatrix<precision>::transform(const CudaMatrix &A, T fn) {
     const uint threadsPerBlock = 128;
     const uint numBlock = size() / threadsPerBlock + 1;
 
@@ -80,8 +81,8 @@ CudaImage<precision> CudaImage<precision>::transform(const CudaImage &A, T fn) {
  *
  * @param value - The value to set all matrix's elements with
  */
-template <typename precision>
-void CudaImage<precision>::fill(precision value) {
+template<typename precision>
+void CudaMatrix<precision>::fill(precision value) {
     const uint threadsPerBlock = 128;
     const uint numBlock = size() / threadsPerBlock + 1;
 
@@ -92,11 +93,15 @@ void CudaImage<precision>::fill(precision value) {
     fillProcess << < numBlock, threadsPerBlock >>>(*this, value);
 }
 
-template <typename precision>
-void CudaImage<precision>::setValuesFromVector(const std::vector<precision> vals) const {
+template<typename precision>
+void CudaMatrix<precision>::setValuesFromVector(const std::vector<precision> vals) const {
+    cudaMemcpy((*this)._data, vals.data(), vals.size() * sizeof(precision), cudaMemcpyHostToDevice);
+}
 
-    cudaMemcpy((*this)._data, vals.data(), vals.size() * sizeof (precision), cudaMemcpyHostToDevice);
-
+template<typename precision>
+void CudaMatrix<precision>::setRowFromVector(int row_index, const std::vector<precision> vals) const {
+    cudaMemcpy(((*this)._data + row_index * _width), vals.data(), vals.size() * sizeof(precision),
+               cudaMemcpyHostToDevice);
 }
 
 /**
@@ -106,15 +111,15 @@ void CudaImage<precision>::setValuesFromVector(const std::vector<precision> vals
  *
  * @param name - The matrix name
  */
-template <typename precision>
-void CudaImage<precision>::display(const std::string &name) const {
+template<typename precision>
+void CudaMatrix<precision>::display(const std::string &name) const {
     precision *hostValues;
 
     ck(cudaMallocHost(&hostValues, bytesSize()));
     ck(cudaMemcpy(hostValues, _data, bytesSize(), cudaMemcpyDeviceToHost));
 
-    std::cout << "Matrix " << name << " " << _width << " x " << _height << " pixels of " << typeid (precision).name()
-            << "\n\n";
+    std::cout << "Matrix " << name << " " << _width << " x " << _height << " pixels of " << typeid(precision).name()
+              << "\n\n";
 
     for (int i = 0; i < _height; ++i) {
         std::cout << "{ ";
@@ -130,7 +135,15 @@ void CudaImage<precision>::display(const std::string &name) const {
 
     ck(cudaFreeHost(hostValues));
 }
-template class CudaImage<double>;
-template class CudaImage<float>;
-template class CudaImage<uint32_t>;
-template class CudaImage<uint8_t>;
+
+template
+class CudaMatrix<double>;
+
+template
+class CudaMatrix<float>;
+
+template
+class CudaMatrix<uint32_t>;
+
+template
+class CudaMatrix<uint8_t>;

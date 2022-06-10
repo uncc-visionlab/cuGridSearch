@@ -35,73 +35,170 @@ typedef unsigned int uint32_t;
 // http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.657.4308&rep=rep1&type=pdf
 
 template<typename precision>
-struct Bounds {
-    precision _start;
-    precision _end;
-    precision _increment;
-
-    Bounds(precision start, precision increment, precision end) :
-            _start(start), _increment(increment), _end(end) {
-        if (_end < _start) {
-            std::cout << "Created invalid bounds. Behavior is undefined." << std::endl;
-        }
-
-    }
-
-    void setIncrement(precision increment) {
-        _increment = increment;
-    }
-};
-
-template<typename precision>
-struct Grid {
-    std::vector<Bounds<precision>> _bounds;
-    std::vector<float> _resolution;
+struct CudaGrid : private CudaMatrix<precision> {
+#define ROW_IDX_START 0
+#define ROW_IDX_END 1
+#define ROW_IDX_RESOLUTION 2
+#define ROW_IDX_SAMPLE_COUNT 3
     uint32_t _dimensions;
 
-    Grid() {}
+    CudaGrid() : _dimensions(0) {}
 
-    Grid(int dimensions) :
-            _dimensions(dimensions),
-            _bounds(dimensions, Bounds<precision>(0, 1, 0)) {
+    CudaGrid(int dimensions) : CudaMatrix<precision>(dimensions, 4),
+                               _dimensions(dimensions) {
     }
 
-    Grid(int dimensions, std::vector<Bounds<precision>> &bounds) :
-            _dimensions(dimensions), _resolution(dimensions, 1.0) {
-        _bounds = bounds;
+    void getAxisSampleCounts(precision *axis_sample_counts) {
+        cudaMemcpy(axis_sample_counts, this->sampleCount(), _dimensions * sizeof(precision), cudaMemcpyDeviceToHost);
     }
 
-    template<typename precision2>
-    Grid(Grid<precision2> &grid) {
-        for (typename std::vector<Bounds<precision2>>::iterator giter = grid._bounds.begin();
-             giter != grid._bounds.end(); ++giter) {
-            _bounds.push_back(Bounds<precision>(giter->_start, giter->_increment, giter->_end));
+    int numElements() {
+        precision axis_sample_counts[_dimensions];
+        int32_t total_size = 1;
+        cudaMemcpy(&axis_sample_counts, this->sampleCount(), _dimensions * sizeof(precision), cudaMemcpyDeviceToHost);
+        for (int axis = 0; axis < _dimensions; axis++) {
+            total_size = total_size * axis_sample_counts[axis];
         }
+        return total_size;
     }
 
-    void setResolution(std::vector<float> &resolution) {
-        _resolution = resolution;
+    void update(int changed_axis = -1) {
+//        const uint threadsPerBlock = 128;
+//        const uint numBlock = size() / threadsPerBlock + 1;
+        updateProcess << < 1, 1 >>>(*this, changed_axis);
+    }
+
+    precision *&data() {
+        return this->_data;
+    }
+
+    uint32_t bytesSize() const {
+        return this->size() * sizeof(precision);
+    }
+
+    // return the vector of starting values in each dimension
+    CUDAFUNCTION precision *startPoint() {
+        return (this->_data + this->toIndex(0, ROW_IDX_START));
+    }
+
+    // return the vector of ending values in each dimension
+    CUDAFUNCTION precision *endPoint() {
+        return (this->_data + this->toIndex(0, ROW_IDX_END));
+    }
+
+    // return the vector of sample counts in each dimension
+    CUDAFUNCTION precision *sampleCount() {
+        return (this->_data + this->toIndex(0, ROW_IDX_SAMPLE_COUNT));
+    }
+
+    // return the vector of resolutions in each dimension
+    CUDAFUNCTION precision *resolution() {
+        return (this->_data + this->toIndex(0, ROW_IDX_RESOLUTION));
+    }
+
+    template<typename T>
+    CUDAFUNCTION uint32_t gridPointToIndex(T *grid_point) {
+        precision *resolution = this->resolution();
+        precision *start_point = this->startPoint();
+        precision *axis_sample_counts = this->sampleCount();
+        int32_t axis_sample_indices[_dimensions];
+        int32_t dimensional_increment = 1;
+
+        // calculate point on grid closest to grid_point
+        for (int axis = 0; axis < _dimensions; axis++) {
+            axis_sample_indices[axis] = round(grid_point[axis] - start_point[axis]) / resolution[axis];
+            assert(axis_sample_indices[axis] >= 0);
+        }
+
+        int indexEncoding = 0;
+        for (int axis = 0; axis < _dimensions; axis++) {
+            indexEncoding += dimensional_increment * axis_sample_indices[axis];
+            dimensional_increment *= axis_sample_counts[axis];
+        }
+
+        return indexEncoding;
+    }
+
+    template<typename T>
+    CUDAFUNCTION CudaVector<precision> indexToGridPoint(T index) {
+        CudaVector<precision> grid_point(_dimensions);
+        precision *resolution = this->resolution();
+        precision *start_point = this->startPoint();
+        precision *axis_sample_counts = this->sampleCount();
+        int32_t axis_sample_indices[_dimensions];
+        int32_t dimensional_increments[_dimensions];
+
+        dimensional_increments[0] = 1;
+        for (int axis = 1; axis < _dimensions; axis++) {
+            dimensional_increments[axis] = axis_sample_counts[axis - 1] * dimensional_increments[axis - 1];
+        }
+
+        for (int axis = _dimensions - 1; axis >= 0; axis++) {
+            axis_sample_indices[axis] = (int) index / dimensional_increments[axis];
+            assert(axis_sample_indices[axis] >= 0);
+            index -= axis_sample_indices[axis] * dimensional_increments[axis];
+        }
+
+        for (int axis = 0; axis < _dimensions; axis++) {
+            grid_point[axis] = start_point[axis] + axis_sample_indices[axis] * resolution[axis];
+        }
+        return grid_point;
+    }
+
+    template<typename T>
+    void setStartPoint(std::vector<T> start_point) {
+        this->setRowFromVector(ROW_IDX_START, start_point);
+        update();
+    }
+
+    template<typename T>
+    void setEndPoint(std::vector<T> end_point) {
+        this->setRowFromVector(ROW_IDX_END, end_point);
+        update();
+    }
+
+    template<typename T>
+    void setResolution(std::vector<T> resolution) {
+        this->setRowFromVector(ROW_IDX_RESOLUTION, resolution);
+        update();
     }
 
     int getDimension() {
         return _dimensions;
     }
 
-    std::vector<uint32_t> getGridSize() {
-        std::vector<uint32_t> gridsize(_dimensions, 0);
-        for (int d = 0; d < _dimensions; ++d) {
-            gridsize[d] = (uint32_t) (1 + (_bounds[d]._end - _bounds[d]._start) / _resolution[d]);
-        }
-        return gridsize;
+//    void fill(precision value);
+
+    void display(const std::string &name = "") const {
+        this->CudaMatrix<precision>::display(name);
     }
 
-    void fill(precision value);
-
-    void display(const std::string &name = "") const;
-
-    void setValuesFromVector(const std::vector<precision> vals) const;
+    void setValuesFromVector(const std::vector<precision> vals) const {
+        this->CudaMatrix<precision>::setValuesFromVector(vals);
+    }
 
 };
+
+template<typename precision>
+__global__ void updateProcess(CudaGrid<precision> matrix, int changed_axis) {
+//    int x = blockDim.x * blockIdx.x + threadIdx.x;
+//    if (x >= matrix.size()) {
+//        return;
+//    }
+//    *(matrix._data + x) = value;
+    precision *start_point = matrix.startPoint();
+    precision *end_point = matrix.endPoint();
+    precision *resolution = matrix.resolution();
+    precision *axis_sample_counts = matrix.sampleCount();
+    if (changed_axis >= 0 && changed_axis < matrix._dimensions) {
+        axis_sample_counts[changed_axis] =
+                (int) (end_point[changed_axis] - start_point[changed_axis]) / resolution[changed_axis];
+    } else {
+        for (int axis = 0; axis < matrix._dimensions; axis++) {
+            axis_sample_counts[axis] = (int) 1 + (end_point[axis] - start_point[axis]) / resolution[axis];
+        }
+    }
+}
 
 //// Since C++ 11
 template<typename func_precision, typename grid_precision, unsigned int D, typename ... Types>
@@ -109,13 +206,17 @@ using func_byvalue_t = func_precision (*)(nv_ext::Vec<grid_precision, D> &gridpt
 
 
 template<typename func_precision, typename grid_precision, unsigned int D, typename ... Types>
-__global__ void evaluationKernel_by_value(func_precision *result,
+__global__ void evaluationKernel_by_value(CudaGrid<grid_precision> grid,
+                                          func_precision *result,
                                           func_byvalue_t<func_precision, grid_precision, D, Types...> op,
                                           nv_ext::Vec<grid_precision, D> gridpt,
                                           Types ... arg_vals) {
-    gridpt[0] = blockDim.x * blockIdx.x + threadIdx.x;
-    gridpt[1] = 0;
-    int offset = gridpt[0];
+    int num_rows = 1;
+    int offset = (blockDim.x * blockIdx.x + threadIdx.x);
+    gridpt[0] = offset / num_rows;
+    gridpt[1] = offset - gridpt[0];
+//    gridpt[0] = gridDim.x + blockDim.x * blockIdx.x + threadIdx.x;
+//    gridpt[1] = 0;
     *(result + offset) = (*op)(gridpt, arg_vals...);
     printf("func_byvalue_t %p setting gridvalue[%d] = %f\n", *op, offset, *(result + offset));
 }
@@ -124,23 +225,27 @@ template<typename func_precision, typename grid_precision, unsigned int D, typen
 using func_byreference_t = func_precision (*)(nv_ext::Vec<grid_precision, D> &gridpt, Types *... arg_ptrs);
 
 template<typename func_precision, typename grid_precision, unsigned int D, typename ... Types>
-__global__ void evaluationKernel_by_reference(func_precision *result,
+__global__ void evaluationKernel_by_reference(CudaGrid<grid_precision> grid,
+                                              func_precision *result,
                                               func_byreference_t<func_precision, grid_precision, D, Types...> op,
                                               nv_ext::Vec<grid_precision, D> gridpt,
                                               Types *... arg_ptrs) {
-    gridpt[0] = blockDim.x * blockIdx.x + threadIdx.x;
-    gridpt[1] = 0;
-    int offset = gridpt[0];
+    int num_rows = 1;
+    int offset = (blockDim.x * blockIdx.x + threadIdx.x);
+    gridpt[0] = offset / num_rows;
+    gridpt[1] = offset - gridpt[0];
+//    gridpt[0] = gridDim.x + blockDim.x * blockIdx.x + threadIdx.x;
+//    gridpt[1] = 0;
     *(result + offset) = (*op)(gridpt, arg_ptrs...);
     printf("func_byreference_t %p setting gridvalue[%d] = %f\n", *op, offset, *(result + offset));
 }
 
 template<typename func_precision, typename grid_precision>
 struct CudaGridSearcher {
-    Grid<grid_precision> _grid;
+    CudaGrid<grid_precision> *_grid;
 
-    CudaGridSearcher(Grid<grid_precision> &grid) {
-        _grid = grid;
+    CudaGridSearcher(CudaGrid<grid_precision> &grid) {
+        _grid = &grid;
     }
 
     // default search procedure uses by-value function parameters
@@ -156,20 +261,31 @@ struct CudaGridSearcher {
     void
     search_by_value(func_byvalue_t<func_precision, grid_precision, 2, Types ...> errorFunction, Types &... arg_vals) {
 
-        std::vector<grid_precision> point(_grid.getDimension(), 0);
+        std::vector<grid_precision> point(_grid->getDimension(), 0);
+        uint64_t total_samples = _grid->numElements();
+        std::cout << "CudaGrid has " << total_samples << " search samples." << std::endl;
 
-        std::vector<uint32_t> gridsize = _grid.getGridSize();
-        uint64_t total_samples = std::accumulate(gridsize.begin(), gridsize.end(), 1,
-                                                 std::multiplies<grid_precision>());
-        std::cout << "Grid has " << total_samples << " search samples." << std::endl;
+        // compute 1D search grid, block and thread index pattern
+        dim3 gridDim(1, 1, 1), blockDim(1, 1, 1);
+        if (total_samples > 512) {
+            blockDim.x = 512;
+            gridDim.x = total_samples / 512 + (total_samples % 512 == 0) ? 1 : 0;
+        } else {
+            blockDim.x = total_samples;
+        }
 
+        // create grid point and result image
         nv_ext::Vec<grid_precision, 2> pt((grid_precision) 0.0f);
-        CudaImage<func_precision> grid_values(6, 6);
+        grid_precision axis_sample_counts[_grid->getDimension()];
+        _grid->getAxisSampleCounts(axis_sample_counts);
+        CudaMatrix<func_precision> grid_values(axis_sample_counts[0], axis_sample_counts[1]);
         ck(cudaMalloc(&grid_values._data, grid_values.bytesSize()));
-        grid_values.fill(11);
+        grid_values.fill(0);
 
-        evaluationKernel_by_value<<<1, 1>>>(grid_values._data, errorFunction,
-                                            pt, arg_vals...);
+        evaluationKernel_by_value<<<1, 1>>>(*_grid, grid_values._data, errorFunction,
+                                                         pt, arg_vals...);
+//        evaluationKernel_by_value<<<gridDim, blockDim>>>(*_grid, grid_values._data, errorFunction,
+//                                                         pt, arg_vals...);
         cudaDeviceSynchronize();
 
         grid_values.display();
@@ -182,14 +298,31 @@ struct CudaGridSearcher {
     template<typename ... Types>
     void search_by_reference(func_byreference_t<func_precision, grid_precision, 2, Types ...> errorFunction,
                              Types *... arg_ptrs) {
+        std::vector<grid_precision> point(_grid->getDimension(), 0);
+        uint64_t total_samples = _grid->numElements();
+        std::cout << "CudaGrid has " << total_samples << " search samples." << std::endl;
 
+        // compute 1D search grid, block and thread index pattern
+        dim3 gridDim(1, 1, 1), blockDim(1, 1, 1);
+        if (total_samples > 512) {
+            blockDim.x = 512;
+            gridDim.x = total_samples / 512 + (total_samples % 512 == 0) ? 1 : 0;
+        } else {
+            blockDim.x = total_samples;
+        }
+
+        // create grid point and result image
         nv_ext::Vec<grid_precision, 2> pt((grid_precision) 0.0f);
-        CudaImage<func_precision> grid_values(6, 6);
+        grid_precision axis_sample_counts[_grid->getDimension()];
+        _grid->getAxisSampleCounts(axis_sample_counts);
+        CudaMatrix<func_precision> grid_values(axis_sample_counts[0], axis_sample_counts[1]);
         ck(cudaMalloc(&grid_values._data, grid_values.bytesSize()));
-        grid_values.fill(12);
+        grid_values.fill(0);
 
-        evaluationKernel_by_reference<<<1, 1>>>(grid_values._data, errorFunction,
-                                                pt, arg_ptrs...);
+        evaluationKernel_by_reference<<<1, 1>>>(*_grid, grid_values._data, errorFunction,
+                                                             pt, arg_ptrs...);
+//        evaluationKernel_by_reference<<<gridDim, blockDim>>>(*_grid, grid_values._data, errorFunction,
+//                                                             pt, arg_ptrs...);
         cudaDeviceSynchronize();
 
         grid_values.display();

@@ -12,7 +12,7 @@
 
 template<typename func_precision, typename grid_precision, unsigned int D, typename pixType>
 CUDAFUNCTION func_precision
-averageAbsoluteDifference(nv_ext::Vec<grid_precision, D> &t, CudaImage<pixType> img_moved, CudaImage<pixType> img_fixed) {
+averageAbsoluteDifference(nv_ext::Vec<grid_precision, D> &t, CudaMatrix<pixType> img_moved, CudaMatrix<pixType> img_fixed) {
     int num_errors = 0;
     printf("img_moved ptr %p\n", img_moved._data);
     printf("img_fixed ptr %p\n", img_fixed._data);
@@ -39,7 +39,7 @@ averageAbsoluteDifference(nv_ext::Vec<grid_precision, D> &t, CudaImage<pixType> 
 
 template<typename func_precision, typename grid_precision, unsigned int D, typename pixType>
 CUDAFUNCTION func_precision
-sumOfAbsoluteDifferences(nv_ext::Vec<grid_precision, D> &t, CudaImage<pixType> img_moved, CudaImage<pixType> img_fixed) {
+sumOfAbsoluteDifferences(nv_ext::Vec<grid_precision, D> &t, CudaMatrix<pixType> img_moved, CudaMatrix<pixType> img_fixed) {
     int num_errors = 0;
     printf("img_moved ptr %p\n", img_moved._data);
     printf("img_fixed ptr %p\n", img_fixed._data);
@@ -68,7 +68,7 @@ sumOfAbsoluteDifferences(nv_ext::Vec<grid_precision, D> &t, CudaImage<pixType> i
 
 template<typename func_precision, typename grid_precision, unsigned int D, typename pixType>
 CUDAFUNCTION func_precision
-averageAbsoluteDifference(nv_ext::Vec<grid_precision, D> &t, CudaImage<pixType> *img_moved, CudaImage<pixType> *img_fixed) {
+averageAbsoluteDifference(nv_ext::Vec<grid_precision, D> &t, CudaMatrix<pixType> *img_moved, CudaMatrix<pixType> *img_fixed) {
     int num_errors = 0;
     printf("img_moved ptr %p\n", img_moved);
     printf("img_fixed ptr %p\n", img_fixed);
@@ -90,7 +90,7 @@ averageAbsoluteDifference(nv_ext::Vec<grid_precision, D> &t, CudaImage<pixType> 
 
 template<typename func_precision, typename grid_precision, unsigned int D, typename pixType>
 CUDAFUNCTION func_precision
-sumOfAbsoluteDifferences(nv_ext::Vec<grid_precision, D> &t, CudaImage<pixType> *img_moved, CudaImage<pixType> *img_fixed) {
+sumOfAbsoluteDifferences(nv_ext::Vec<grid_precision, D> &t, CudaMatrix<pixType> *img_moved, CudaMatrix<pixType> *img_fixed) {
     printf("img_moved ptr %p\n", img_moved);
     printf("img_fixed ptr %p\n", img_fixed);
     printf("img_moved data ptr %p\n", img_moved->_data);

@@ -26,18 +26,20 @@
 typedef unsigned int uint32_t;
 
 template<typename precision>
-struct CudaImage {
+struct CudaMatrix {
     precision *_data;
     int32_t _width,
             _height;
 
-    CUDAFUNCTION CudaImage(uint32_t _width, uint32_t _height) :
-            _width(_width), _height(_height) {
+    CUDAFUNCTION CudaMatrix() : _width(0), _height(0) {}
+
+    CUDAFUNCTION CudaMatrix(uint32_t width, uint32_t height) :
+            _width(width), _height(height) {
         // if on CPU
         //_data = new precision[_width * _height];
     }
 
-    CUDAFUNCTION ~CudaImage() {
+    CUDAFUNCTION ~CudaMatrix() {
         // if on CPU
         //delete[] _data;
     }
@@ -54,14 +56,18 @@ struct CudaImage {
         return _height;
     }
 
+    CUDAFUNCTION precision *column(int column_index) {
+        return (_data + column_index * _height);
+    }
+
     CUDAFUNCTION precision &at(int x, int y) const {
         return _data[toIndex(x, y)];
     }
 
     template<typename T>
     CUDAFUNCTION int toIndex(T x, T y) const {
-        // column-major ordering of _data
-        return ((int) x) * _height + (int) y;
+        // row-major ordering of _data
+        return ((int) y) * _width + (int) x;
     }
 
     CUDAFUNCTION bool inImage(float x, float y) const {
@@ -88,48 +94,59 @@ struct CudaImage {
 
     void setValuesFromVector(const std::vector<precision> vals) const;
 
+    void setRowFromVector(int column_index, const std::vector<precision> vals) const;
+
     template<typename T>
-    CudaImage transform(const CudaImage &A, T fn);
+    CudaMatrix transform(const CudaMatrix &A, T fn);
 
-    CudaImage &operator=(CudaImage m);
+    //CudaMatrix &operator=(CudaMatrix m);
 
-    CudaImage operator+=(const CudaImage &m) {
+    CudaMatrix operator+=(const CudaMatrix &m) {
         return transform(m, [=] __device__(precision x, precision y) { return x + y; });
     }
 
-    CudaImage operator-=(const CudaImage &m) {
+    CudaMatrix operator-=(const CudaMatrix &m) {
         return transform(m, [=] __device__(precision x, precision y) { return x - y; });
     }
 
-    CudaImage operator*=(const CudaImage &m) {
+    CudaMatrix operator*=(const CudaMatrix &m) {
         return transform(m, [=] __device__(precision x, precision y) { return x * y; });
     }
 };
 
+template<typename precision>
+struct CudaImage : public CudaMatrix<precision> {
 
-
-
-
-class GridPointXY {
-    int _x, _y;
-    float _value;
-
-public:
-
-    GridPointXY(int x, int y, float value) : _value(value), _x(x), _y(y) {
+    CUDAFUNCTION CudaImage(uint32_t _width, uint32_t _height) : CudaMatrix<precision>(_width, _height) {
     }
 
-    int &x() {
-        return _x;
+    CUDAFUNCTION ~CudaImage() {
     }
 
-    int &y() {
-        return _y;
+};
+
+template<typename precision>
+struct CudaVector : public CudaMatrix<precision> {
+
+    CUDAFUNCTION CudaVector() : CudaMatrix<precision>(1, 0) {
     }
 
-    float &value() {
-        return _value;
+    CUDAFUNCTION CudaVector(uint32_t _dim) : CudaMatrix<precision>(1, _dim) {
     }
+
+    CUDAFUNCTION ~CudaVector() {
+    }
+
+    CUDAFUNCTION precision &at(int row) const {
+        return at(1, row);
+    }
+
+    template<typename T>
+    CUDAFUNCTION int toIndex(T row) const {
+        // column-major ordering of _data
+        return toIndex(1, row);
+    }
+
 };
 
 #endif /* CUDAIMAGE_CUH */
