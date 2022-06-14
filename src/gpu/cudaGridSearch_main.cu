@@ -132,7 +132,7 @@ int main(int argc, char **argv) {
     std::vector<grid_precision> start_point = {(grid_precision) -m2.width() / 2, (grid_precision) -m2.height() / 2};
     std::vector<grid_precision> end_point = {(grid_precision) std::abs(m1.width() - (m2.width() / 2)),
                                              (grid_precision) std::abs(m1.height() - (m2.height() / 2))};
-//    std::vector<grid_precision> resolution = {(grid_precision) 0.001f, (grid_precision) 0.001f};
+//    std::vector<grid_precision> resolution = {(grid_precision) 0.01f, (grid_precision) 0.01f};
     std::vector<grid_precision> resolution = {(grid_precision) 0.1f, (grid_precision) 0.1f};
 
     CudaGrid<grid_precision> translation_xy_grid(grid_dimension);

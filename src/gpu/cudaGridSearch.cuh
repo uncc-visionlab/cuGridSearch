@@ -33,6 +33,15 @@
 typedef unsigned int uint32_t;
 
 // http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.657.4308&rep=rep1&type=pdf
+#define gpuErrchk(ans) { gpuAssert((ans), __FILE__, __LINE__); }
+inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true)
+{
+    if (code != cudaSuccess)
+    {
+        fprintf(stderr,"GPUassert: %s %s %d\n", cudaGetErrorString(code), file, line);
+        if (abort) exit(code);
+    }
+}
 
 // forward declaration of template class for __global__ device code
 template<typename precision>
@@ -299,7 +308,8 @@ struct CudaGridSearcher {
 
         evaluationKernel_by_value<<< gridDim, blockDim>>>(*_grid, (*_result).data(), total_samples, errorFunction,
                                                           pt, arg_vals...);
-//        cudaDeviceSynchronize();
+        gpuErrchk( cudaPeekAtLastError() );
+        gpuErrchk( cudaDeviceSynchronize() );
     }
 
     // this will search a function with by-reference arguments
@@ -325,7 +335,8 @@ struct CudaGridSearcher {
 
         evaluationKernel_by_reference<<< gridDim, blockDim>>>(*_grid, (*_result).data(), total_samples, errorFunction,
                                                               pt, arg_ptrs...);
-//        cudaDeviceSynchronize();
+        gpuErrchk( cudaPeekAtLastError() );
+        gpuErrchk( cudaDeviceSynchronize() );
     }
 
 };
