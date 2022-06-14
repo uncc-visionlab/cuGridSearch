@@ -151,7 +151,7 @@ int main(int argc, char **argv) {
 
     // first template argument is the error function return type
     // second template argument is the grid point value type
-    CudaGridSearcher<func_precision, grid_precision> translation_xy_gridsearcher(translation_xy_grid);
+    CudaGridSearcher<func_precision, grid_precision, grid_dimension> translation_xy_gridsearcher(translation_xy_grid);
 
     // Copy device function pointer for the function having by-value parameters to host side
     cudaMemcpyFromSymbol(&host_func_byval_ptr, dev_func_byvalue_ptr,

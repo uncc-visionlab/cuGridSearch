@@ -9,7 +9,7 @@
 #include "cudaGridSearch.cuh"
 #include "cudaErrorFunctions.cuh"
 
-#define grid_dimension 2        // the dimension of the grid, e.g., 1 => 1D grid, 2 => 2D grid, 3=> 3D grid, etc.
+#define grid_dimension 8        // the dimension of the grid, e.g., 1 => 1D grid, 2 => 2D grid, 3=> 3D grid, etc.
 typedef float grid_precision;   // the type of values in the grid, e.g., float, double, int, etc.
 typedef float func_precision;   // the type of values taken by the error function, e.g., float, double, int, etc.
 typedef double pixel_precision; // the type of values in the image, e.g., float, double, int, etc.
@@ -17,8 +17,9 @@ typedef double pixel_precision; // the type of values in the image, e.g., float,
 typedef func_byvalue_t<func_precision, grid_precision, grid_dimension, CudaImage<pixel_precision>, CudaImage<pixel_precision> > image_err_func_byvalue;
 
 // create device function pointer for by-value kernel function here
-__device__ image_err_func_byvalue dev_func_byvalue_ptr = averageAbsoluteDifference<func_precision, grid_precision, grid_dimension, pixel_precision>;
+//__device__ image_err_func_byvalue dev_func_byvalue_ptr = averageAbsoluteDifference<func_precision, grid_precision, grid_dimension, pixel_precision>;
 //__device__ image_err_func_byvalue dev_func_byvalue_ptr = sumOfAbsoluteDifferences<func_precision, grid_precision, grid_dimension, pixel_precision>;
+__device__ image_err_func_byvalue dev_func_byvalue_ptr = averageAbsoluteDifferenceH<func_precision, grid_precision, grid_dimension, pixel_precision>;
 
 // test grid search
 // classes typically store images in column major format so the images
@@ -73,34 +74,45 @@ int main(int argc, char **argv) {
     //m1 *= m2;
     //m1.display("m1 * m2");
 
-    std::vector<grid_precision> start_point = {(grid_precision) -m2._width / 2, (grid_precision) -m2._height / 2};
-    std::vector<grid_precision> end_point = {(grid_precision) std::abs(m1._width - (m2._width / 2)),
-                                  (grid_precision) std::abs(m1._height - (m2._height / 2))};
-    std::vector<grid_precision> resolution = {(grid_precision) 0.5f, (grid_precision) 0.5f};
+    std::vector<grid_precision> start_point = {
+            1, 0, (grid_precision) -m2._width / 2,
+            1, 0, (grid_precision) -m2._height / 2,
+            0, 0
+    };
+    std::vector<grid_precision> end_point = {
+            1, 0, (grid_precision) std::abs(m1._width - (m2._width / 2)),
+            1, 0, (grid_precision) std::abs(m1._height - (m2._height / 2)),
+            0, 0
+    };
+    std::vector<grid_precision> resolution = {
+            1, 1, (grid_precision) 0.5f,
+            1, 1, (grid_precision) 0.5f,
+            1, 1
+    };
 
-    CudaGrid<grid_precision> translation_xy_grid(grid_dimension);
-    ck(cudaMalloc(&translation_xy_grid.data(), translation_xy_grid.bytesSize()));
+    CudaGrid<grid_precision> perspective_transform_grid(grid_dimension);
+    ck(cudaMalloc(&perspective_transform_grid.data(), perspective_transform_grid.bytesSize()));
 
-    translation_xy_grid.setStartPoint(start_point);
-    translation_xy_grid.setEndPoint(end_point);
-    translation_xy_grid.setResolution(resolution);
-    translation_xy_grid.display("translation_xy_grid");
+    perspective_transform_grid.setStartPoint(start_point);
+    perspective_transform_grid.setEndPoint(end_point);
+    perspective_transform_grid.setResolution(resolution);
+    perspective_transform_grid.display("perspective_xy_grid");
 
     // first template argument is the error function return type
     // second template argument is the grid point value type
-    CudaGridSearcher<func_precision, grid_precision> translation_xy_gridsearcher(translation_xy_grid);
+    CudaGridSearcher<func_precision, grid_precision, grid_dimension> perspective_transform_gridsearcher(perspective_transform_grid);
 
     // Copy device function pointer for the function having by-value parameters to host side
     cudaMemcpyFromSymbol(&host_func_byval_ptr, dev_func_byvalue_ptr,
                          sizeof(image_err_func_byvalue));
 
-    //translation_xy_gridsearcher.search(host_func_byval_ptr, m1, m2);
-    translation_xy_gridsearcher.search_by_value(host_func_byval_ptr, m1, m2);
+    //perspective_transform_gridsearcher.search(host_func_byval_ptr, m1, m2);
+    perspective_transform_gridsearcher.search_by_value(host_func_byval_ptr, m1, m2);
 
     // Clean memory
     ck(cudaFree(m1._data));
     ck(cudaFree(m2._data));
-    ck(cudaFree(translation_xy_grid.data()));
+    ck(cudaFree(perspective_transform_grid.data()));
 
     return EXIT_SUCCESS;
 }

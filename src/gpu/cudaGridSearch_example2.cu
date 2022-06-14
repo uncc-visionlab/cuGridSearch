@@ -87,7 +87,7 @@ int main(int argc, char **argv) {
 
     // first template argument is the error function return type
     // second template argument is the grid point value type
-    CudaGridSearcher<func_precision, grid_precision> translation_xy_gridsearcher(translation_xy_grid);
+    CudaGridSearcher<func_precision, grid_precision, grid_dimension> translation_xy_gridsearcher(translation_xy_grid);
 
     CudaImage<pixel_precision> *d_m1, *d_m2;
     ck(cudaMalloc((void **) &d_m1, sizeof(CudaImage<pixel_precision>)));
