@@ -6,7 +6,7 @@
 #define CUDAERRORFUNCTIONS_CUH
 
 #include <nvVectorNd.h>
-#include "cudaImage.cuh"
+#include "cudaTensor.cuh"
 
 // An example of a device function with by-value arguments
 

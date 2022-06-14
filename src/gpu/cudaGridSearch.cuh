@@ -27,12 +27,32 @@
 #include "helper_functions.h"
 #include "helper_cuda.h"
 
-#include "cudaImage.cuh"
+#include "cudaTensor.cuh"
 
 #define ck(x) x
 typedef unsigned int uint32_t;
 
 // http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.657.4308&rep=rep1&type=pdf
+
+// forward declaration of template class for __global__ device code
+template<typename precision>
+class CudaGrid;
+
+template<typename precision>
+__global__ void updateProcess(CudaGrid<precision> matrix, int changed_axis) {
+    precision *start_pointArr = matrix.start_point();
+    precision *end_pointArr = matrix.end_point();
+    precision *resolutionArr = matrix.resolution();
+    precision *axis_sample_countArr = matrix.axis_sample_count();
+    if (changed_axis >= 0 && changed_axis < matrix._dimensions) {
+        axis_sample_countArr[changed_axis] =
+                (int) (end_pointArr[changed_axis] - start_pointArr[changed_axis]) / resolutionArr[changed_axis];
+    } else {
+        for (int axis = 0; axis < matrix._dimensions; axis++) {
+            axis_sample_countArr[axis] = (int) 1 + (end_pointArr[axis] - start_pointArr[axis]) / resolutionArr[axis];
+        }
+    }
+}
 
 template<typename precision>
 struct CudaGrid : private CudaMatrix<precision> {
@@ -182,31 +202,9 @@ struct CudaGrid : private CudaMatrix<precision> {
 
 };
 
-template<typename precision>
-__global__ void updateProcess(CudaGrid<precision> matrix, int changed_axis) {
-//    int x = blockDim.x * blockIdx.x + threadIdx.x;
-//    if (x >= matrix.size()) {
-//        return;
-//    }
-//    *(matrix._data + x) = value;
-    precision *start_pointArr = matrix.start_point();
-    precision *end_pointArr = matrix.end_point();
-    precision *resolutionArr = matrix.resolution();
-    precision *axis_sample_countArr = matrix.axis_sample_count();
-    if (changed_axis >= 0 && changed_axis < matrix._dimensions) {
-        axis_sample_countArr[changed_axis] =
-                (int) (end_pointArr[changed_axis] - start_pointArr[changed_axis]) / resolutionArr[changed_axis];
-    } else {
-        for (int axis = 0; axis < matrix._dimensions; axis++) {
-            axis_sample_countArr[axis] = (int) 1 + (end_pointArr[axis] - start_pointArr[axis]) / resolutionArr[axis];
-        }
-    }
-}
-
 //// Since C++ 11
 template<typename func_precision, typename grid_precision, unsigned int D, typename ... Types>
 using func_byvalue_t = func_precision (*)(nv_ext::Vec<grid_precision, D> &gridpt, Types ... arg_vals);
-
 
 template<typename func_precision, typename grid_precision, unsigned int D, typename ... Types>
 __global__ void evaluationKernel_by_value(CudaGrid<grid_precision> grid,
@@ -259,16 +257,15 @@ __global__ void evaluationKernel_by_reference(CudaGrid<grid_precision> grid,
     delete[] grid_point;
 }
 
-//template<typename func_precision, unsigned int D>
-//class CudaTensor;
-
 template<typename func_precision, typename grid_precision, unsigned int D>
 struct CudaGridSearcher {
 #define BLOCK_DIM 512
     CudaGrid<grid_precision> *_grid;
+    CudaTensor<func_precision, D> *_result;
 
-    CudaGridSearcher(CudaGrid<grid_precision> &grid) {
+    CudaGridSearcher(CudaGrid<grid_precision> &grid, CudaTensor<func_precision, D> &result) {
         _grid = &grid;
+        _result = &result;
     }
 
     // default search procedure uses by-value function parameters
@@ -299,18 +296,10 @@ struct CudaGridSearcher {
 
         // create grid point and result image
         nv_ext::Vec<grid_precision, D> pt((grid_precision) 0.0f);
-        grid_precision axis_sample_counts[D];
-        _grid->getAxisSampleCounts(axis_sample_counts);
-        CudaTensor<func_precision, D> grid_values(axis_sample_counts);
-        ck(cudaMalloc(&grid_values._data, grid_values.bytesSize()));
-        grid_values.fill(0);
 
-        evaluationKernel_by_value<<< gridDim, blockDim>>>(*_grid, grid_values._data, total_samples, errorFunction,
+        evaluationKernel_by_value<<< gridDim, blockDim>>>(*_grid, (*_result).data(), total_samples, errorFunction,
                                                           pt, arg_vals...);
-        cudaDeviceSynchronize();
-
-        grid_values.display();
-        ck(cudaFree(grid_values._data));
+//        cudaDeviceSynchronize();
     }
 
     // this will search a function with by-reference arguments
@@ -333,19 +322,10 @@ struct CudaGridSearcher {
 
         // create grid point and result image
         nv_ext::Vec<grid_precision, D> pt((grid_precision) 0.0f);
-        grid_precision axis_sample_counts[D];
-        _grid->getAxisSampleCounts(axis_sample_counts);
-        CudaTensor<func_precision, D> grid_values(axis_sample_counts);
-        ck(cudaMalloc(&grid_values._data, grid_values.bytesSize()));
-        grid_values.fill(0);
 
-
-        evaluationKernel_by_reference<<< gridDim, blockDim>>>(*_grid, grid_values._data, total_samples, errorFunction,
+        evaluationKernel_by_reference<<< gridDim, blockDim>>>(*_grid, (*_result).data(), total_samples, errorFunction,
                                                               pt, arg_ptrs...);
-        cudaDeviceSynchronize();
-
-        grid_values.display();
-        ck(cudaFree(grid_values._data));
+//        cudaDeviceSynchronize();
     }
 
 };

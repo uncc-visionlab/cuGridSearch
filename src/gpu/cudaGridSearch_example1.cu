@@ -5,7 +5,7 @@
 //#include <cstdlib>
 #include <iostream>
 
-#include "cudaImage.cuh"
+#include "cudaTensor.cuh"
 
 #include "cudaGridSearch.cuh"
 #include "cudaErrorFunctions.cuh"
@@ -61,25 +61,18 @@ int main(int argc, char **argv) {
     CudaImage<pixel_precision> m1(6, 6);
     CudaImage<pixel_precision> m2(6, 6);
 
-    ck(cudaMalloc(&m1._data, m1.bytesSize()));
-    ck(cudaMalloc(&m2._data, m2.bytesSize()));
-
-    // Test here
+    ck(cudaMalloc(&m1.data(), m1.bytesSize()));
+    ck(cudaMalloc(&m2.data(), m2.bytesSize()));
 
     m1.setValuesFromVector(std::vector<pixel_precision>(imageA_data, imageA_data + 6 * 6));
     m2.setValuesFromVector(std::vector<pixel_precision>(imageA_data, imageA_data + 6 * 6));
-//    m1.fill(5);
-//    m2.fill(10);
 
     m1.display("m1");
     m2.display("m2");
 
-    //m1 *= m2;
-    //m1.display("m1 * m2");
-
-    std::vector<grid_precision> start_point = {(grid_precision) -m2._width / 2, (grid_precision) -m2._height / 2};
-    std::vector<grid_precision> end_point = {(grid_precision) std::abs(m1._width - (m2._width / 2)),
-                                  (grid_precision) std::abs(m1._height - (m2._height / 2))};
+    std::vector<grid_precision> start_point = {(grid_precision) -m2.width() / 2, (grid_precision) -m2.height() / 2};
+    std::vector<grid_precision> end_point = {(grid_precision) std::abs(m1.width() - (m2.width() / 2)),
+                                  (grid_precision) std::abs(m1.height() - (m2.height() / 2))};
     std::vector<grid_precision> resolution = {(grid_precision) 0.1f, (grid_precision) 0.1f};
 
     CudaGrid<grid_precision> translation_xy_grid(grid_dimension);
@@ -90,9 +83,16 @@ int main(int argc, char **argv) {
     translation_xy_grid.setResolution(resolution);
     translation_xy_grid.display("translation_xy_grid");
 
+    grid_precision axis_sample_counts[grid_dimension];
+    translation_xy_grid.getAxisSampleCounts(axis_sample_counts);
+
+    CudaTensor<func_precision, grid_dimension> func_values(axis_sample_counts);
+    ck(cudaMalloc(&func_values._data, func_values.bytesSize()));
+    func_values.fill(0);
+
     // first template argument is the error function return type
     // second template argument is the grid point value type
-    CudaGridSearcher<func_precision, grid_precision, grid_dimension> translation_xy_gridsearcher(translation_xy_grid);
+    CudaGridSearcher<func_precision, grid_precision, grid_dimension> translation_xy_gridsearcher(translation_xy_grid, func_values);
 
     // Copy device function pointer for the function having by-value parameters to host side
     cudaMemcpyFromSymbol(&host_func_byval_ptr, dev_func_byvalue_ptr,
@@ -101,10 +101,13 @@ int main(int argc, char **argv) {
     //translation_xy_gridsearcher.search(host_func_byval_ptr, m1, m2);
     translation_xy_gridsearcher.search_by_value(host_func_byval_ptr, m1, m2);
 
+    func_values.display();
+
     // Clean memory
-    ck(cudaFree(m1._data));
-    ck(cudaFree(m2._data));
+    ck(cudaFree(m1.data()));
+    ck(cudaFree(m2.data()));
     ck(cudaFree(translation_xy_grid.data()));
+    ck(cudaFree(func_values.data()));
 
     return EXIT_SUCCESS;
 }
