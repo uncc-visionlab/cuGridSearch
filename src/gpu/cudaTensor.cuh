@@ -11,69 +11,57 @@
  * Created on June 1, 2022, 6:10 PM
  */
 
-#ifndef CUDAIMAGE_CUH
-#define CUDAIMAGE_CUH
+#ifndef CUDATENSOR_CUH
+#define CUDATENSOR_CUH
 
 #define CUDAFUNCTION __host__ __device__
 
 #include <cassert>
-#include <stdint.h>
+#include <iostream>
+#include <numeric>
 #include <string>
 #include <vector>
 #include <cuda/std/limits>
 
-#define ck(x) x
-typedef unsigned int uint32_t;
-
-// forward declaration of template class for __global__ device code
+// forward declare the CudaTensor class to allow __global__ CudaTensor kernel function declarations
 template<typename precision, unsigned int D>
 class CudaTensor;
 
-/**
- * Device code to set a matrix value to the given one
- *
- * @tparam precision - The matrix precision
- *
- * @param matrix - The matrix to set the value to
- * @param value - The value to set
- */
+// declare all CudaTensor __global__ and __device__ functions so they can be used in the CudaTensor
+// class template definition
+template<class T, unsigned int blockSize, bool nIsPow2>
+__global__ void reduceMin6(T *g_idata, int *g_idxs, T *g_odata, int *g_oIdxs, unsigned int n);
+
 template<typename precision, unsigned int D>
-__global__ void fillProcess(CudaTensor<precision, D> tensor, precision value) {
-    int x = blockDim.x * blockIdx.x + threadIdx.x;
+__global__ void fillProcess(CudaTensor<precision, D> tensor, precision value);
 
-    if (x >= tensor.size()) {
-        return;
-    }
+__device__ void warp_reduce_min(volatile float smem[64]);
 
-    *(tensor._data + x) = value;
-}
+__device__ void warp_reduce_max(volatile float smem[64]);
 
-/**
- * Device code to apply a function f for each element of matrix A and B with A = f(A, B)
- *
- * @tparam precision - The matrix precision
- *
- * @param A - The matrix A to store the result in
- * @param B - The matrix B to compute the result from
- * @param transform - The function to apply on each A'elements such as A(i) = transform(A(i), B(i))
- */
+template<typename precision, int els_per_block, int threads>
+__global__ void find_min_max(precision *in, precision *out);
+
 template<typename precision, typename T, unsigned int D>
 __global__ void transformProcess(CudaTensor<precision, D> A,
                                  CudaTensor<precision, D> B,
-                                 T transform) {
-    int x = blockDim.x * blockIdx.x + threadIdx.x;
-
-    if (x >= A.size()) {
-        return;
-    }
-
-    // transform(*(A._data + x), *(B._data + x)) seems to return nothing but do not crash ...
-
-    *(A._data + x) = transform(*(A._data + x), *(B._data + x));
-}
+                                 T transform);
 
 template<typename precision, unsigned int D>
-struct CudaTensor {
+__global__ void
+findExtremaProcess(CudaTensor<precision, D> tensor, CudaTensor<precision, D> extrema_value_buffer,
+                   CudaTensor<uint32_t, 1> extrema_index_buffer);
+
+template<typename precision, int els_per_block, int threads>
+__global__ void find_min_max(precision *in, precision *out);
+
+#define ck(x) x
+typedef unsigned int uint32_t;
+
+// CudaTensor class template definition
+
+template<typename precision, unsigned int D>
+struct __align__(16) CudaTensor {
     precision *_data;
     int32_t _dims[D];
     int32_t _dimensional_increments[D];
@@ -137,12 +125,14 @@ struct CudaTensor {
     }
 
     template<typename T>
-    CUDAFUNCTION int toIndex(T x, T y) const {
+    CUDAFUNCTION int toIndex(T x, T y) const
+    {
         return toIndex1d({x, y});
     }
 
     template<typename T>
-    CUDAFUNCTION int toIndex1d(const T (&axis_index)[D]) const {
+    CUDAFUNCTION int toIndex1d(const T (&axis_index)[D]) const
+    {
         // calculate 1-dimensional index from multi-dimensional index
         int indexEncoding = 0;
 #pragma unroll
@@ -176,6 +166,34 @@ struct CudaTensor {
         // thrust::uninitialized_fill(thrustPtr, thrustPtr + size(), value);
 
         fillProcess <<< numBlock, threadsPerBlock >>>(*this, value);
+    }
+
+    /**
+     * Find extreme values of the matrix and their indices.
+     *
+     * @tparam precision - The matrix precision
+     *
+     * @param value - The value to set all matrix's elements with
+     */
+    void find_extrema(precision &extrema_value, uint32_t &extrema_index1d) {
+        const uint threadsPerBlock = 128;
+        const uint numBlock = size() / threadsPerBlock + 1;
+        CudaTensor<precision, D> extrema_value_buffer;
+        CudaTensor<uint32_t, 1> extrema_index_buffer({this->_total_size});
+        ck(cudaMalloc(&extrema_index_buffer.data(), extrema_index_buffer.bytesSize()));
+        ck(cudaMalloc(&extrema_value_buffer.data(), extrema_value_buffer.bytesSize()));
+        ck(cudaMemcpy(&extrema_value_buffer.data(), this->data(), this->bytesSize(), cudaMemcpyDeviceToDevice));
+        std::vector<uint32_t> host_index_values(this->_total_size);
+        std::iota (std::begin(host_index_values), std::end(host_index_values), 0);
+        extrema_index_buffer.setValuesFromVector(host_index_values);
+        int smemSize = (threadsPerBlock <= 32) ? 2 * threadsPerBlock * sizeof(precision) : threadsPerBlock * sizeof(precision);
+        smemSize += threadsPerBlock*sizeof(int);
+        findExtremaProcess <<< numBlock, threadsPerBlock, smemSize >>>(*this, extrema_value_buffer, extrema_index_buffer);
+
+        ck(cudaMemcpy(&extrema_value, extrema_value_buffer.data(), 1 * sizeof(precision), cudaMemcpyDeviceToHost));
+        ck(cudaMemcpy(&extrema_index1d, extrema_index_buffer.data(), 1 * sizeof(uint32_t), cudaMemcpyDeviceToHost));
+        ck(cudaFree(extrema_value_buffer.data()));
+        ck(cudaFree(extrema_index_buffer.data()));
     }
 
     /**
@@ -342,5 +360,7 @@ struct CudaVector : public CudaMatrix<precision> {
     }
 };
 
-#endif /* CUDAIMAGE_CUH */
+#include "cudaTensorKernels.cuh"
+
+#endif /* CUDATENSOR_CUH */
 

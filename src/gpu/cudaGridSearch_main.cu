@@ -21,7 +21,9 @@
 
 #include "helper_functions.h"
 #include "helper_cuda.h"
+
 #include "cudaTensor.cuh"
+
 #include "cudaGridSearch.cuh"
 #include "cudaErrorFunctions.cuh"
 
@@ -96,7 +98,7 @@ pixel_precision imageC_data[6 * 6] = {1, 1, 0, 0, 0, 0,
 };
 
 int main(int argc, char **argv) {
-    cxxopts::Options options("cuda_gridsearch", "UNC Charlotte Machine Vision Lab CUDA-accelerated gridsearch code.");
+    cxxopts::Options options("cuda_gridsearch", "UNC Charlotte Machine Vision Lab CUDA-accelerated grid search code.");
     cxxopts_integration(options);
 
     auto result = options.parse(argc, argv);
@@ -133,7 +135,7 @@ int main(int argc, char **argv) {
     std::vector<grid_precision> end_point = {(grid_precision) std::abs(m1.width() - (m2.width() / 2)),
                                              (grid_precision) std::abs(m1.height() - (m2.height() / 2))};
 //    std::vector<grid_precision> resolution = {(grid_precision) 0.01f, (grid_precision) 0.01f};
-    std::vector<grid_precision> resolution = {(grid_precision) 0.1f, (grid_precision) 0.1f};
+    std::vector<grid_precision> resolution = {(grid_precision) 1.0f, (grid_precision) 1.0f};
 
     CudaGrid<grid_precision> translation_xy_grid(grid_dimension);
     ck(cudaMalloc(&translation_xy_grid.data(), translation_xy_grid.bytesSize()));
@@ -147,7 +149,7 @@ int main(int argc, char **argv) {
     translation_xy_grid.getAxisSampleCounts(axis_sample_counts);
 
     CudaTensor<func_precision, grid_dimension> func_values(axis_sample_counts);
-    ck(cudaMalloc(&func_values._data, func_values.bytesSize()));
+    ck(cudaMalloc(&func_values.data(), func_values.bytesSize()));
     func_values.fill(0);
 
     // first template argument is the error function return type
@@ -162,6 +164,10 @@ int main(int argc, char **argv) {
     translation_xy_gridsearcher.search_by_value(host_func_byval_ptr, m1, m2);
 
     func_values.display();
+
+    func_precision min_value;
+    uint32_t min_value_index1d;
+    func_values.find_extrema(min_value, min_value_index1d);
 
     // Clean memory
     ck(cudaFree(m1.data()));
