@@ -116,8 +116,6 @@ int main(int argc, char **argv) {
     cuda_device = findCudaDevice(0, nullptr);
     checkCudaErrors(cudaGetDevice(&cuda_device));
     checkCudaErrors(cudaGetDeviceProperties(&deviceProp, cuda_device));
-//    cudaCheckErrors("copyImageXYToDevice::cudaMalloc image.values() failed.");
-//    cudaCheckErrors("copyImageXYToDevice::cudaMemcpy image.values() failed.");
 
     CudaImage<pixel_precision> m1(6, 6);
     CudaImage<pixel_precision> m2(6, 6);
@@ -126,7 +124,7 @@ int main(int argc, char **argv) {
     ck(cudaMalloc(&m2.data(), m2.bytesSize()));
 
     m1.setValuesFromVector(std::vector<pixel_precision>(imageA_data, imageA_data + 6 * 6));
-    m2.setValuesFromVector(std::vector<pixel_precision>(imageA_data, imageA_data + 6 * 6));
+    m2.setValuesFromVector(std::vector<pixel_precision>(imageC_data, imageC_data + 6 * 6));
 
     m1.display("m1");
     m2.display("m2");
@@ -169,13 +167,15 @@ int main(int argc, char **argv) {
     func_precision min_value;
     int32_t min_value_index1d;
     func_values.find_extrema(min_value, min_value_index1d);
-//    grid_precision min_grid_point[grid_dimension];
-//    translation_xy_grid.indexToGridPoint(min_value_index1d, min_grid_point);
-//    std::cout << "Minimum found at point p = { ";
-//    for (int d=0; d < grid_dimension; d++) {
-//        std::cout << min_grid_point[d] << ((d < grid_dimension -1) ? ", " : "");
-//    }
-//    std::cout << "}" << std::endl;
+
+    grid_precision min_grid_point[grid_dimension];
+    translation_xy_grid.getGridPoint(min_grid_point, min_value_index1d);
+    std::cout << "Minimum found at point p = { ";
+    for (int d=0; d < grid_dimension; d++) {
+        std::cout << min_grid_point[d] << ((d < grid_dimension -1) ? ", " : " ");
+    }
+    std::cout << "}" << std::endl;
+
     // Clean memory
     ck(cudaFree(m1.data()));
     ck(cudaFree(m2.data()));

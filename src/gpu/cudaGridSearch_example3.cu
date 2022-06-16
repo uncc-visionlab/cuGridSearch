@@ -68,19 +68,19 @@ int main(int argc, char **argv) {
     m2.display("m2");
 
     std::vector<grid_precision> start_point = {
-            0.5, 0.5, (grid_precision) -m2.width() / 2,
-            0.5, 0.5, (grid_precision) -m2.height() / 2,
+            1, 0, (grid_precision) -m2.width() / 2,
+            0, 1, (grid_precision) -m2.height() / 2,
             0, 0
     };
     std::vector<grid_precision> end_point = {
-            1, 1, (grid_precision) std::abs( m1.width() - (m2.width() / 2)),
-            1, 1, (grid_precision) std::abs( m1.height() - (m2.height() / 2)),
-            .5, .5
+            1, 0, (grid_precision) std::abs( m1.width() - (m2.width() / 2)),
+            0, 1, (grid_precision) std::abs( m1.height() - (m2.height() / 2)),
+            .1, .1
     };
     std::vector<grid_precision> resolution = {
-            .25, .25, (grid_precision) 0.5f,
-            .25, .25, (grid_precision) 0.5f,
-            .25, .25
+            .1, .1, (grid_precision) 0.1f,
+            .1, .1, (grid_precision) 0.1f,
+            .1, .1
     };
 
     CudaGrid<grid_precision, grid_dimension> perspective_transform_grid;
@@ -111,6 +111,18 @@ int main(int argc, char **argv) {
     perspective_transform_gridsearcher.search_by_value(host_func_byval_ptr, m1, m2);
 
 //    func_values.display();
+
+    func_precision min_value;
+    int32_t min_value_index1d;
+    func_values.find_extrema(min_value, min_value_index1d);
+
+    grid_precision min_grid_point[grid_dimension];
+    perspective_transform_grid.getGridPoint(min_grid_point, min_value_index1d);
+    std::cout << "Minimum found at point p = { ";
+    for (int d=0; d < grid_dimension; d++) {
+        std::cout << min_grid_point[d] << ((d < grid_dimension -1) ? ", " : " ");
+    }
+    std::cout << "}" << std::endl;
 
     // Clean memory
     ck(cudaFree(m1.data()));

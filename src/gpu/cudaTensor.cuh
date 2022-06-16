@@ -179,16 +179,11 @@ struct __align__(16) CudaTensor {
     void find_extrema(precision &extrema_value, int32_t &extrema_index1d) {
         const uint threadsPerBlock = 512;
         const uint numBlocks = size() / threadsPerBlock + 1;
-        // allocate space for the reduction and also ensure sufficient space to decode
-        // both the extrema value (element 0) and the Nd grid point values (elements [1,...,D])
-        // the indices are returned in 1d (element 0) and Nd (elements [1, ... ,D])
-        const uint numValues = (D + 1 > numBlocks) ? (D + 1) : numBlocks;
-        const uint numIndices = (D + 1 > numBlocks) ? (D + 1) : numBlocks;
         precision host_block_extrema_values[numBlocks];
         int32_t host_block_extrema_indices[numBlocks];
         CudaTensor<int32_t, 1> tensor_indices({this->_total_size});
-        CudaTensor<precision, 1> device_block_extrema_values({numValues});
-        CudaTensor<int32_t, 1> device_block_extrema_indices({numIndices});
+        CudaTensor<precision, 1> device_block_extrema_values({numBlocks});
+        CudaTensor<int32_t, 1> device_block_extrema_indices({numBlocks});
         ck(cudaMalloc(&tensor_indices.data(), tensor_indices.bytesSize()));
         ck(cudaMalloc(&device_block_extrema_indices.data(), device_block_extrema_indices.bytesSize()));
         ck(cudaMalloc(&device_block_extrema_values.data(), device_block_extrema_values.bytesSize()));
@@ -213,9 +208,9 @@ struct __align__(16) CudaTensor {
         // all threads need to terminate before values can be copied off the GPU
         cudaDeviceSynchronize();
 
-        ck(cudaMemcpy(host_block_extrema_values, device_block_extrema_values.data(), numValues * sizeof(precision),
+        ck(cudaMemcpy(host_block_extrema_values, device_block_extrema_values.data(), numBlocks * sizeof(precision),
                       cudaMemcpyDeviceToHost));
-        ck(cudaMemcpy(host_block_extrema_indices, device_block_extrema_indices.data(), numIndices * sizeof(uint32_t),
+        ck(cudaMemcpy(host_block_extrema_indices, device_block_extrema_indices.data(), numBlocks * sizeof(uint32_t),
                       cudaMemcpyDeviceToHost));
         extrema_value = host_block_extrema_values[0];
         extrema_index1d = host_block_extrema_indices[0];
@@ -227,7 +222,7 @@ struct __align__(16) CudaTensor {
 //                extrema_index1d = host_block_extrema_indices[i];
 //            }
 //        }
-        printf("\n Grid MIN value has idx: %d  value: %f", extrema_index1d, extrema_value);
+        printf("\n Grid MIN value has idx: %d  value: %f\n", extrema_index1d, extrema_value);
         ck(cudaFree(device_block_extrema_values.data()));
         ck(cudaFree(device_block_extrema_indices.data()));
         ck(cudaFree(tensor_indices.data()));

@@ -103,7 +103,19 @@ int main(int argc, char **argv) {
 
     translation_xy_gridsearcher.search_by_reference(host_func_byref_ptr, d_m1, d_m2);
 
-    func_values.display();
+//    func_values.display();
+
+    func_precision min_value;
+    int32_t min_value_index1d;
+    func_values.find_extrema(min_value, min_value_index1d);
+
+    grid_precision min_grid_point[grid_dimension];
+    translation_xy_grid.getGridPoint(min_grid_point, min_value_index1d);
+    std::cout << "Minimum found at point p = { ";
+    for (int d=0; d < grid_dimension; d++) {
+        std::cout << min_grid_point[d] << ((d < grid_dimension -1) ? ", " : " ");
+    }
+    std::cout << "}" << std::endl;
 
     ck(cudaFree(d_m1));
     ck(cudaFree(d_m2));
