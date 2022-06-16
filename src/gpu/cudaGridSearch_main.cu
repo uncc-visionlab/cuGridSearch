@@ -134,10 +134,10 @@ int main(int argc, char **argv) {
     std::vector<grid_precision> start_point = {(grid_precision) -m2.width() / 2, (grid_precision) -m2.height() / 2};
     std::vector<grid_precision> end_point = {(grid_precision) std::abs(m1.width() - (m2.width() / 2)),
                                              (grid_precision) std::abs(m1.height() - (m2.height() / 2))};
-//    std::vector<grid_precision> resolution = {(grid_precision) 0.01f, (grid_precision) 0.01f};
-    std::vector<grid_precision> resolution = {(grid_precision) 1.0f, (grid_precision) 1.0f};
+    std::vector<grid_precision> resolution = {(grid_precision) 0.0005f, (grid_precision) 0.0005f};
+//    std::vector<grid_precision> resolution = {(grid_precision) 0.1f, (grid_precision) 0.1f};
 
-    CudaGrid<grid_precision> translation_xy_grid(grid_dimension);
+    CudaGrid<grid_precision, grid_dimension> translation_xy_grid;
     ck(cudaMalloc(&translation_xy_grid.data(), translation_xy_grid.bytesSize()));
 
     translation_xy_grid.setStartPoint(start_point);
@@ -150,11 +150,12 @@ int main(int argc, char **argv) {
 
     CudaTensor<func_precision, grid_dimension> func_values(axis_sample_counts);
     ck(cudaMalloc(&func_values.data(), func_values.bytesSize()));
-    func_values.fill(0);
+    //func_values.fill(0);
 
     // first template argument is the error function return type
     // second template argument is the grid point value type
-    CudaGridSearcher<func_precision, grid_precision, grid_dimension> translation_xy_gridsearcher(translation_xy_grid, func_values);
+    CudaGridSearcher<func_precision, grid_precision, grid_dimension> translation_xy_gridsearcher(translation_xy_grid,
+                                                                                                 func_values);
 
     // Copy device function pointer for the function having by-value parameters to host side
     cudaMemcpyFromSymbol(&host_func_byval_ptr, dev_func_byvalue_ptr,
@@ -163,12 +164,18 @@ int main(int argc, char **argv) {
     //translation_xy_gridsearcher.search(host_func_byval_ptr, m1, m2);
     translation_xy_gridsearcher.search_by_value(host_func_byval_ptr, m1, m2);
 
-    func_values.display();
+//    func_values.display();
 
     func_precision min_value;
-    uint32_t min_value_index1d;
+    int32_t min_value_index1d;
     func_values.find_extrema(min_value, min_value_index1d);
-
+//    grid_precision min_grid_point[grid_dimension];
+//    translation_xy_grid.indexToGridPoint(min_value_index1d, min_grid_point);
+//    std::cout << "Minimum found at point p = { ";
+//    for (int d=0; d < grid_dimension; d++) {
+//        std::cout << min_grid_point[d] << ((d < grid_dimension -1) ? ", " : "");
+//    }
+//    std::cout << "}" << std::endl;
     // Clean memory
     ck(cudaFree(m1.data()));
     ck(cudaFree(m2.data()));

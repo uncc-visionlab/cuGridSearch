@@ -27,17 +27,11 @@
 template<typename precision, unsigned int D>
 class CudaTensor;
 
-// declare all CudaTensor __global__ and __device__ functions so they can be used in the CudaTensor
+// declare all CudaTensor __global__ kernel functions (in cudaTensorKernels.cuh) so they can be used in the CudaTensor
 // class template definition
-template<class T, unsigned int blockSize, bool nIsPow2>
-__global__ void reduceMin6(T *g_idata, int *g_idxs, T *g_odata, int *g_oIdxs, unsigned int n);
 
 template<typename precision, unsigned int D>
 __global__ void fillProcess(CudaTensor<precision, D> tensor, precision value);
-
-__device__ void warp_reduce_min(volatile float smem[64]);
-
-__device__ void warp_reduce_max(volatile float smem[64]);
 
 template<typename precision, int els_per_block, int threads>
 __global__ void find_min_max(precision *in, precision *out);
@@ -49,8 +43,10 @@ __global__ void transformProcess(CudaTensor<precision, D> A,
 
 template<typename precision, unsigned int D>
 __global__ void
-findExtremaProcess(CudaTensor<precision, D> tensor, CudaTensor<precision, D> extrema_value_buffer,
-                   CudaTensor<uint32_t, 1> extrema_index_buffer);
+findExtremaProcess(CudaTensor<precision, D> tensor,
+                   CudaTensor<int32_t, 1> tensor_indices,
+                   CudaTensor<precision, D> device_block_extrema_values,
+                   CudaTensor<int32_t, 1> device_block_extrema_indices);
 
 template<typename precision, int els_per_block, int threads>
 __global__ void find_min_max(precision *in, precision *out);
@@ -95,8 +91,15 @@ struct __align__(16) CudaTensor {
         //delete[] _data;
     }
 
-    precision *&data() {
+    CUDAFUNCTION precision *&data() {
         return _data;
+    }
+
+    // Implementation of [] operator.  This function must return a
+    // reference as array element can be put on left side
+    __device__ precision &operator[](int index) {
+        assert(index < _total_size);
+        return _data[index];
     }
 
     CUDAFUNCTION uint32_t size(const int dim = -1) const {
@@ -125,14 +128,12 @@ struct __align__(16) CudaTensor {
     }
 
     template<typename T>
-    CUDAFUNCTION int toIndex(T x, T y) const
-    {
+    CUDAFUNCTION int toIndex(T x, T y) const {
         return toIndex1d({x, y});
     }
 
     template<typename T>
-    CUDAFUNCTION int toIndex1d(const T (&axis_index)[D]) const
-    {
+    CUDAFUNCTION int toIndex1d(const T (&axis_index)[D]) const {
         // calculate 1-dimensional index from multi-dimensional index
         int indexEncoding = 0;
 #pragma unroll
@@ -142,7 +143,7 @@ struct __align__(16) CudaTensor {
         return indexEncoding;
     }
 
-    __device__ void toIndexNd(uint32_t index1d, uint32_t (&indexNd)[D]) const {
+    CUDAFUNCTION void toIndexNd(uint32_t index1d, uint32_t (&indexNd)[D]) const {
 #pragma unroll
         for (int axis = D - 1; axis >= 0; axis--) {
             indexNd[axis] = ((uint32_t) index1d / _dimensional_increments[axis]);
@@ -175,25 +176,61 @@ struct __align__(16) CudaTensor {
      *
      * @param value - The value to set all matrix's elements with
      */
-    void find_extrema(precision &extrema_value, uint32_t &extrema_index1d) {
-        const uint threadsPerBlock = 128;
-        const uint numBlock = size() / threadsPerBlock + 1;
-        CudaTensor<precision, D> extrema_value_buffer;
-        CudaTensor<uint32_t, 1> extrema_index_buffer({this->_total_size});
-        ck(cudaMalloc(&extrema_index_buffer.data(), extrema_index_buffer.bytesSize()));
-        ck(cudaMalloc(&extrema_value_buffer.data(), extrema_value_buffer.bytesSize()));
-        ck(cudaMemcpy(&extrema_value_buffer.data(), this->data(), this->bytesSize(), cudaMemcpyDeviceToDevice));
-        std::vector<uint32_t> host_index_values(this->_total_size);
-        std::iota (std::begin(host_index_values), std::end(host_index_values), 0);
-        extrema_index_buffer.setValuesFromVector(host_index_values);
-        int smemSize = (threadsPerBlock <= 32) ? 2 * threadsPerBlock * sizeof(precision) : threadsPerBlock * sizeof(precision);
-        smemSize += threadsPerBlock*sizeof(int);
-        findExtremaProcess <<< numBlock, threadsPerBlock, smemSize >>>(*this, extrema_value_buffer, extrema_index_buffer);
+    void find_extrema(precision &extrema_value, int32_t &extrema_index1d) {
+        const uint threadsPerBlock = 512;
+        const uint numBlocks = size() / threadsPerBlock + 1;
+        // allocate space for the reduction and also ensure sufficient space to decode
+        // both the extrema value (element 0) and the Nd grid point values (elements [1,...,D])
+        // the indices are returned in 1d (element 0) and Nd (elements [1, ... ,D])
+        const uint numValues = (D + 1 > numBlocks) ? (D + 1) : numBlocks;
+        const uint numIndices = (D + 1 > numBlocks) ? (D + 1) : numBlocks;
+        precision host_block_extrema_values[numBlocks];
+        int32_t host_block_extrema_indices[numBlocks];
+        CudaTensor<int32_t, 1> tensor_indices({this->_total_size});
+        CudaTensor<precision, 1> device_block_extrema_values({numValues});
+        CudaTensor<int32_t, 1> device_block_extrema_indices({numIndices});
+        ck(cudaMalloc(&tensor_indices.data(), tensor_indices.bytesSize()));
+        ck(cudaMalloc(&device_block_extrema_indices.data(), device_block_extrema_indices.bytesSize()));
+        ck(cudaMalloc(&device_block_extrema_values.data(), device_block_extrema_values.bytesSize()));
 
-        ck(cudaMemcpy(&extrema_value, extrema_value_buffer.data(), 1 * sizeof(precision), cudaMemcpyDeviceToHost));
-        ck(cudaMemcpy(&extrema_index1d, extrema_index_buffer.data(), 1 * sizeof(uint32_t), cudaMemcpyDeviceToHost));
-        ck(cudaFree(extrema_value_buffer.data()));
-        ck(cudaFree(extrema_index_buffer.data()));
+        std::vector<int32_t> host_index_values(this->_total_size);
+        std::iota(std::begin(host_index_values), std::end(host_index_values), 0);
+        tensor_indices.setValuesFromVector(host_index_values);
+        if (threadsPerBlock > 512) {
+            std::cout << "CudaTensor::findExtremaProcess() cannot work properly with more than 512 threads per block!!"
+                      << std::endl;
+        }
+        // when there is only one warp per block, we need to allocate two warps
+        // worth of shared memory so that we don't index shared memory out of bounds
+        int smemSize = (threadsPerBlock <= 32) ? 2 * threadsPerBlock * sizeof(precision) : threadsPerBlock *
+                                                                                           sizeof(precision);
+        smemSize += threadsPerBlock * sizeof(int32_t);
+
+        findExtremaProcess <<< numBlocks, threadsPerBlock, smemSize >>>(*this, tensor_indices,
+                                                                        device_block_extrema_values,
+                                                                        device_block_extrema_indices);
+
+        // all threads need to terminate before values can be copied off the GPU
+        cudaDeviceSynchronize();
+
+        ck(cudaMemcpy(host_block_extrema_values, device_block_extrema_values.data(), numValues * sizeof(precision),
+                      cudaMemcpyDeviceToHost));
+        ck(cudaMemcpy(host_block_extrema_indices, device_block_extrema_indices.data(), numIndices * sizeof(uint32_t),
+                      cudaMemcpyDeviceToHost));
+        extrema_value = host_block_extrema_values[0];
+        extrema_index1d = host_block_extrema_indices[0];
+        //printf("\n Reduce MIN GPU idx: %d  value: %f", host_block_extrema_indices[0], host_block_extrema_values[0]);
+//        for (int i = 1; i < numBlocks; i++) {
+//            printf("\n Reduce MIN GPU idx: %d  value: %f", host_block_extrema_indices[i], host_block_extrema_values[i]);
+//            if (host_block_extrema_values[i] < extrema_value) {
+//                extrema_value = host_block_extrema_values[i];
+//                extrema_index1d = host_block_extrema_indices[i];
+//            }
+//        }
+        printf("\n Grid MIN value has idx: %d  value: %f", extrema_index1d, extrema_value);
+        ck(cudaFree(device_block_extrema_values.data()));
+        ck(cudaFree(device_block_extrema_indices.data()));
+        ck(cudaFree(tensor_indices.data()));
     }
 
     /**

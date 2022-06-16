@@ -2,7 +2,6 @@
 #define CUDAFUNCTION __host__ __device__
 
 #include <cmath>
-//#include <cstdlib>
 #include <iostream>
 
 #include "cudaTensor.cuh"
@@ -84,7 +83,7 @@ int main(int argc, char **argv) {
             .25, .25
     };
 
-    CudaGrid<grid_precision> perspective_transform_grid(grid_dimension);
+    CudaGrid<grid_precision, grid_dimension> perspective_transform_grid;
     ck(cudaMalloc(&perspective_transform_grid.data(), perspective_transform_grid.bytesSize()));
 
     perspective_transform_grid.setStartPoint(start_point);
@@ -111,7 +110,7 @@ int main(int argc, char **argv) {
     //perspective_transform_gridsearcher.search(host_func_byval_ptr, m1, m2);
     perspective_transform_gridsearcher.search_by_value(host_func_byval_ptr, m1, m2);
 
-    func_values.display();
+//    func_values.display();
 
     // Clean memory
     ck(cudaFree(m1.data()));

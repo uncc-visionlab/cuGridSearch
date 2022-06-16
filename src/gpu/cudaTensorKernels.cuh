@@ -8,6 +8,63 @@
 #include <stdint.h>
 #include <cuda/std/limits>
 
+bool isPow2(unsigned int x) {
+    return ((x & (x - 1)) == 0);
+}
+
+unsigned int nextPow2(unsigned int x) {
+    --x;
+    x |= x >> 1;
+    x |= x >> 2;
+    x |= x >> 4;
+    x |= x >> 8;
+    x |= x >> 16;
+    return ++x;
+}
+
+#ifndef MIN
+#define MIN(x,y) ((x < y) ? x : y)
+#endif
+
+#ifndef MIN_IDX
+#define MIN_IDX(x, y, idx_x, idx_y) ((x < y) ? idx_x : idx_y)
+#endif
+
+////////////////////////////////////////////////////////////////////////////////
+// Compute the number of threads and blocks to use for the given reduction kernel
+// For the kernels >= 3, we set threads / block to the minimum of maxThreads and
+// n/2. For kernels < 3, we set to the minimum of maxThreads and n.  For kernel
+// 6, we observe the maximum specified number of blocks, because each thread in
+// that kernel can process a variable number of elements.
+////////////////////////////////////////////////////////////////////////////////
+void getNumBlocksAndThreads(int whichKernel, int n, int maxBlocks,
+                            int maxThreads, int &blocks, int &threads) {
+    //get device capability, to avoid block/grid size exceed the upper bound
+    cudaDeviceProp prop;
+    int device;
+    cudaGetDevice(&device);
+    cudaGetDeviceProperties(&prop, device);
+    if (whichKernel < 3) {
+        threads = (n < maxThreads) ? nextPow2(n) : maxThreads;
+        blocks = (n + threads - 1) / threads;
+    } else {
+        threads = (n < maxThreads * 2) ? nextPow2((n + 1) / 2) : maxThreads;
+        blocks = (n + (threads * 2 - 1)) / (threads * 2);
+    }
+    if ((float) threads * blocks > (float) prop.maxGridSize[0] * prop.maxThreadsPerBlock) {
+        printf("n is too large, please choose a smaller number!\n");
+    }
+    if (blocks > prop.maxGridSize[0]) {
+        printf("Grid size <%d> exceeds the device capability <%d>, set block size as %d (original %d)\n",
+               blocks, prop.maxGridSize[0], threads * 2, threads);
+        blocks /= 2;
+        threads *= 2;
+    }
+    if (whichKernel == 6) {
+        blocks = MIN(maxBlocks, blocks);
+    }
+}
+
 // forward declaration of template class for __global__ device code
 template<typename precision, unsigned int D>
 class CudaTensor;
@@ -50,9 +107,13 @@ struct SharedMemory<double> {
  Note, this kernel needs a minimum of 64*sizeof(T) bytes of shared memory.
  In other words if blockSize <= 32, allocate 64*sizeof(T) bytes.
  If blockSize > 32, allocate blockSize*sizeof(T) bytes.
+
+ https://stackoverflow.com/questions/38176136/finding-minimum-value-in-array-and-its-index-using-cuda-shfl-down-function
+
  */
-template<class T, unsigned int blockSize, bool nIsPow2>
-__global__ void reduceMin6(T *g_idata, int *g_idxs, T *g_odata, int *g_oIdxs, unsigned int n) {
+template<class T, int blockSize>
+__device__ void reduceMin6(T *g_idata, int *g_idxs, T *g_odata, int *g_oIdxs,
+                           const unsigned int n) {
     T *sdata = SharedMemory<T>();
     // memory for indices is allocated after memory for data
     int *sdataIdx = (int *) (sdata + blockSize);
@@ -63,7 +124,7 @@ __global__ void reduceMin6(T *g_idata, int *g_idxs, T *g_odata, int *g_oIdxs, un
     unsigned int i = blockIdx.x * blockSize * 2 + threadIdx.x;
     unsigned int gridSize = blockSize * 2 * gridDim.x;
 
-    T myMin = 99999;
+    T myMin = cuda::std::numeric_limits<T>::infinity();
     int myMinIdx = -1;
     // we reduce multiple elements per thread.  The number is determined by the
     // number of active thread blocks (via gridDim).  More blocks will result
@@ -72,11 +133,14 @@ __global__ void reduceMin6(T *g_idata, int *g_idxs, T *g_odata, int *g_oIdxs, un
         myMinIdx = MIN_IDX(g_idata[i], myMin, g_idxs[i], myMinIdx);
         myMin = MIN(g_idata[i], myMin);
         // ensure we don't read out of bounds -- this is optimized away for powerOf2 sized arrays
-        if (nIsPow2 || i + blockSize < n) {
+        if (i + blockSize < n) {
             //myMin += g_idata[i + blockSize];
             myMinIdx = MIN_IDX(g_idata[i + blockSize], myMin, g_idxs[i + blockSize], myMinIdx);
             myMin = MIN(g_idata[i + blockSize], myMin);
         }
+//        if (tid == 0 && blockIdx.x == 0) {
+//            printf("(thread,block)=(%d,%d):: i1=%d, i2=%d, n=%d, myMin = %f, myMinIdx=%d\n", tid, blockIdx.x, i, i + blockSize, n, myMin, myMinIdx);
+//        }
         i += gridSize;
     }
     // each thread puts its local sum into shared memory
@@ -86,7 +150,6 @@ __global__ void reduceMin6(T *g_idata, int *g_idxs, T *g_odata, int *g_oIdxs, un
     // do reduction in shared mem
     if ((blockSize >= 512) && (tid < 256)) {
         //sdata[tid] = mySum = mySum + sdata[tid + 256];
-
         sdataIdx[tid] = myMinIdx = MIN_IDX(sdata[tid + 256], myMin, sdataIdx[tid + 256], myMinIdx);
         sdata[tid] = myMin = MIN(sdata[tid + 256], myMin);
     }
@@ -115,11 +178,14 @@ __global__ void reduceMin6(T *g_idata, int *g_idxs, T *g_odata, int *g_oIdxs, un
         // Reduce final warp using shuffle
         for (int offset = warpSize / 2; offset > 0; offset /= 2) {
             //myMin += __shfl_down(myMin, offset);
-            int tempMyMinIdx = __shfl_down(myMinIdx, offset);
-            float tempMyMin = __shfl_down(myMin, offset);
+            int tempMyMinIdx = __shfl_down_sync(0xFFFFFFFF, myMinIdx, offset);
+            float tempMyMin = __shfl_down_sync(0xFFFFFFFF, myMin, offset);
 
             myMinIdx = MIN_IDX(tempMyMin, myMin, tempMyMinIdx, myMinIdx);
             myMin = MIN(tempMyMin, myMin);
+//            if (tid == 0 && blockIdx.x == 0) {
+//                printf("(thread,block)=(%d,%d):: offset=%d, myMin = %f, myMinIdx=%d\n", tid, blockIdx.x, offset, (float) myMin, myMinIdx);
+//            }
         }
     }
     __syncthreads();
@@ -147,24 +213,6 @@ __global__ void fillProcess(CudaTensor<precision, D> tensor, precision value) {
     *(tensor._data + x) = value;
 }
 
-__device__ void warp_reduce_min(volatile float smem[64]) {
-    smem[threadIdx.x] = smem[threadIdx.x + 32] < smem[threadIdx.x] ? smem[threadIdx.x + 32] : smem[threadIdx.x];
-    smem[threadIdx.x] = smem[threadIdx.x + 16] < smem[threadIdx.x] ? smem[threadIdx.x + 16] : smem[threadIdx.x];
-    smem[threadIdx.x] = smem[threadIdx.x + 8] < smem[threadIdx.x] ? smem[threadIdx.x + 8] : smem[threadIdx.x];
-    smem[threadIdx.x] = smem[threadIdx.x + 4] < smem[threadIdx.x] ? smem[threadIdx.x + 4] : smem[threadIdx.x];
-    smem[threadIdx.x] = smem[threadIdx.x + 2] < smem[threadIdx.x] ? smem[threadIdx.x + 2] : smem[threadIdx.x];
-    smem[threadIdx.x] = smem[threadIdx.x + 1] < smem[threadIdx.x] ? smem[threadIdx.x + 1] : smem[threadIdx.x];
-}
-
-__device__ void warp_reduce_max(volatile float smem[64]) {
-    smem[threadIdx.x] = smem[threadIdx.x + 32] > smem[threadIdx.x] ? smem[threadIdx.x + 32] : smem[threadIdx.x];
-    smem[threadIdx.x] = smem[threadIdx.x + 16] > smem[threadIdx.x] ? smem[threadIdx.x + 16] : smem[threadIdx.x];
-    smem[threadIdx.x] = smem[threadIdx.x + 8] > smem[threadIdx.x] ? smem[threadIdx.x + 8] : smem[threadIdx.x];
-    smem[threadIdx.x] = smem[threadIdx.x + 4] > smem[threadIdx.x] ? smem[threadIdx.x + 4] : smem[threadIdx.x];
-    smem[threadIdx.x] = smem[threadIdx.x + 2] > smem[threadIdx.x] ? smem[threadIdx.x + 2] : smem[threadIdx.x];
-    smem[threadIdx.x] = smem[threadIdx.x + 1] > smem[threadIdx.x] ? smem[threadIdx.x + 1] : smem[threadIdx.x];
-}
-
 /**
  * Device code to find a matrix extremal value
  *
@@ -173,56 +221,79 @@ __device__ void warp_reduce_max(volatile float smem[64]) {
  * @param matrix - The matrix to set the value to
  * @param value - The value to set
  */
-template<typename precision, int els_per_block, int threads>
-__global__ void find_min_max(precision *in, precision *out) {
-    __shared__ float smem_min[64];
-    __shared__ uint32_t smem_idx[64];
-//    __shared__ float smem_max[64];
-
-    int tid = threadIdx.x + blockIdx.x * els_per_block;
-
-//    float max = -cuda::std::numeric_limits<precision>::infinity();
-    float min = cuda::std::numeric_limits<precision>::infinity();
-    float val;
-
-    const int iterations = els_per_block / threads;
-
-#pragma unroll
-    for (int i = 0; i < iterations; i++) {
-        val = in[tid + i * threads];
-        min = val < min ? val : min;
-//        max = val > max ? val : max;
-    }
-
-    if (threads == 32) {
-        smem_min[threadIdx.x + 32] = 0.0f;
-//        smem_max[threadIdx.x+32] = 0.0f;
-    }
-
-    smem_min[threadIdx.x] = min;
-//    smem_max[threadIdx.x] = max;
-
-    __syncthreads();
-
-    if (threadIdx.x < 32) {
-        warp_reduce_min(smem_min);
-//        warp_reduce_max(smem_max);
-    }
-    if (threadIdx.x == 0) {
-        out[blockIdx.x] = smem_min[threadIdx.x]; // out[0] == ans
-//        out[blockIdx.x + gridDim.x] = smem_max[threadIdx.x];
-    }
-}
-
 template<typename precision, unsigned int D>
 __global__ void
-findExtremaProcess(CudaTensor<precision, D> tensor, CudaTensor<precision, D> extrema_value_buffer,
-                   CudaTensor<uint32_t, 1> extrema_index_buffer) {
-    int x = blockDim.x * blockIdx.x + threadIdx.x;
-    if (x >= tensor.size()) {
-        return;
+findExtremaProcess(CudaTensor<precision, D> tensor,
+                   CudaTensor<int32_t, 1> tensor_indices,
+                   CudaTensor<precision, 1> device_block_extrema_values,
+                   CudaTensor<int32_t, 1> device_block_extrema_indices) {
+    // Do block reductions in parallel for each block
+    switch (blockDim.x) {
+        case 512:
+            reduceMin6<precision, 512>(tensor.data(), tensor_indices.data(),
+                                       device_block_extrema_values.data(), device_block_extrema_indices.data(), tensor.size());
+            break;
+
+        case 256:
+            reduceMin6<precision, 256>(tensor.data(), tensor_indices.data(),
+                                       device_block_extrema_values.data(), device_block_extrema_indices.data(), tensor.size());
+            break;
+
+        case 128:
+            reduceMin6<precision, 128>(tensor.data(), tensor_indices.data(),
+                                       device_block_extrema_values.data(), device_block_extrema_indices.data(), tensor.size());
+            break;
+
+        case 64:
+            reduceMin6<precision, 64>(tensor.data(), tensor_indices.data(),
+                                      device_block_extrema_values.data(), device_block_extrema_indices.data(), tensor.size());
+            break;
+
+        case 32:
+            reduceMin6<precision, 32>(tensor.data(), tensor_indices.data(),
+                                      device_block_extrema_values.data(), device_block_extrema_indices.data(), tensor.size());
+            break;
+
+        case 16:
+            reduceMin6<precision, 16>(tensor.data(), tensor_indices.data(),
+                                      device_block_extrema_values.data(), device_block_extrema_indices.data(), tensor.size());
+            break;
+
+        case 8:
+            reduceMin6<precision, 8>(tensor.data(), tensor_indices.data(),
+                                     device_block_extrema_values.data(), device_block_extrema_indices.data(), tensor.size());
+            break;
+
+        case 4:
+            reduceMin6<precision, 4>(tensor.data(), tensor_indices.data(),
+                                     device_block_extrema_values.data(), device_block_extrema_indices.data(), tensor.size());
+            break;
+
+        case 2:
+            reduceMin6<precision, 2>(tensor.data(), tensor_indices.data(),
+                                     device_block_extrema_values.data(), device_block_extrema_indices.data(), tensor.size());
+            break;
+
+        case 1:
+            reduceMin6<precision, 1>(tensor.data(), tensor_indices.data(),
+                                     device_block_extrema_values.data(), device_block_extrema_indices.data(), tensor.size());
+            break;
     }
-    *(tensor._data + x) = 0;
+    __syncthreads();
+    // compute global min
+    if (blockIdx.x == 0 && threadIdx.x == 0) {
+        precision &extrema_value = device_block_extrema_values[0];
+        int32_t &extrema_index1d = device_block_extrema_indices[0];
+        for (int i = 1; i < gridDim.x; i++) {
+//            printf("\n Reduce MIN GPU idx: %d  value: %f", device_block_extrema_indices[i], device_block_extrema_values[i]);
+            if (device_block_extrema_values[i] < extrema_value) {
+                extrema_value = device_block_extrema_values[i];
+                extrema_index1d = device_block_extrema_indices[i];
+            }
+        }
+        printf("\n Grid MIN value has idx: %d  value: %f", extrema_index1d, extrema_value);
+        // decode the index to a grid point and put in the device_block_extrema_values at indices [1, ..., D]
+    }
 }
 
 /**
@@ -244,59 +315,6 @@ __global__ void transformProcess(CudaTensor<precision, D> A,
     }
     // transform(*(A._data + x), *(B._data + x)) seems to return nothing but do not crash ...
     *(A._data + x) = transform(*(A._data + x), *(B._data + x));
-}
-
-bool isPow2(unsigned int x) {
-    return ((x & (x - 1)) == 0);
-}
-
-unsigned int nextPow2(unsigned int x) {
-    --x;
-    x |= x >> 1;
-    x |= x >> 2;
-    x |= x >> 4;
-    x |= x >> 8;
-    x |= x >> 16;
-    return ++x;
-}
-
-#ifndef MIN
-#define MIN(x,y) ((x < y) ? x : y)
-#endif
-
-////////////////////////////////////////////////////////////////////////////////
-// Compute the number of threads and blocks to use for the given reduction kernel
-// For the kernels >= 3, we set threads / block to the minimum of maxThreads and
-// n/2. For kernels < 3, we set to the minimum of maxThreads and n.  For kernel
-// 6, we observe the maximum specified number of blocks, because each thread in
-// that kernel can process a variable number of elements.
-////////////////////////////////////////////////////////////////////////////////
-void getNumBlocksAndThreads(int whichKernel, int n, int maxBlocks,
-                            int maxThreads, int &blocks, int &threads) {
-    //get device capability, to avoid block/grid size exceed the upper bound
-    cudaDeviceProp prop;
-    int device;
-    cudaGetDevice(&device);
-    cudaGetDeviceProperties(&prop, device);
-    if (whichKernel < 3) {
-        threads = (n < maxThreads) ? nextPow2(n) : maxThreads;
-        blocks = (n + threads - 1) / threads;
-    } else {
-        threads = (n < maxThreads * 2) ? nextPow2((n + 1) / 2) : maxThreads;
-        blocks = (n + (threads * 2 - 1)) / (threads * 2);
-    }
-    if ((float) threads * blocks > (float) prop.maxGridSize[0] * prop.maxThreadsPerBlock) {
-        printf("n is too large, please choose a smaller number!\n");
-    }
-    if (blocks > prop.maxGridSize[0]) {
-        printf("Grid size <%d> exceeds the device capability <%d>, set block size as %d (original %d)\n",
-                blocks, prop.maxGridSize[0], threads * 2, threads);
-        blocks /= 2;
-        threads *= 2;
-    }
-    if (whichKernel == 6) {
-        blocks = MIN(maxBlocks, blocks);
-    }
 }
 
 #endif //CUDATENSORKERNELS_CUH
