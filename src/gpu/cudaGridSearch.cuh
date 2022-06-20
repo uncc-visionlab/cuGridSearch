@@ -77,7 +77,7 @@ struct CudaGrid : private CudaMatrix<precision> {
 #define ROW_IDX_RESOLUTION 2
 #define ROW_IDX_SAMPLE_COUNT 3
 
-    CudaGrid() : CudaMatrix<precision>(D, 4) {
+    CudaGrid() : CudaMatrix<precision>(4, D) {
     }
 
     void getAxisSampleCounts(precision *axis_sample_counts) {
@@ -113,22 +113,22 @@ struct CudaGrid : private CudaMatrix<precision> {
 
     // return the vector of starting values in each dimension
     CUDAFUNCTION precision *start_point(int axis_index = 0) {
-        return (this->_data + this->toIndex(0, ROW_IDX_START) + axis_index);
+        return (this->_data + this->toIndex(ROW_IDX_START, 0) + axis_index);
     }
 
     // return the vector of ending values in each dimension
     CUDAFUNCTION precision *end_point(int axis_index = 0) {
-        return (this->_data + this->toIndex(0, ROW_IDX_END) + axis_index);
+        return (this->_data + this->toIndex(ROW_IDX_END, 0) + axis_index);
     }
 
     // return the vector of sample counts in each dimension
     CUDAFUNCTION precision *axis_sample_count(int axis_index = 0) {
-        return (this->_data + this->toIndex(0, ROW_IDX_SAMPLE_COUNT) + axis_index);
+        return (this->_data + this->toIndex(ROW_IDX_SAMPLE_COUNT, 0) + axis_index);
     }
 
     // return the vector of resolutions in each dimension
     CUDAFUNCTION precision *resolution(int axis_index = 0) {
-        return (this->_data + this->toIndex(0, ROW_IDX_RESOLUTION) + axis_index);
+        return (this->_data + this->toIndex(ROW_IDX_RESOLUTION, 0) + axis_index);
     }
 
     template<typename T>
@@ -175,11 +175,13 @@ struct CudaGrid : private CudaMatrix<precision> {
             axis_sample_indices[axis] = ((int) index / dimensional_increments[axis]);
             assert(axis_sample_indices[axis] >= 0);
             index -= axis_sample_indices[axis] * dimensional_increments[axis];
+//            printf("axis_index[%d] = %d\n", axis, axis_sample_indices[axis]);
         }
 
 #pragma unroll
         for (int axis = 0; axis < D; axis++) {
             device_grid_point[axis] = start_pointArr[axis] + axis_sample_indices[axis] * resolutionArr[axis];
+//            printf("gridpt[%d] = %f\n", axis, device_grid_point[axis]);
         }
     }
 
@@ -246,7 +248,9 @@ __global__ void updateProcess(CudaGrid<precision, D> grid, int changed_axis) {
 
 template<typename precision, unsigned int D>
 __global__ void gridPointProcess(CudaGrid<precision, D> grid, int index1d, precision *device_grid_point) {
-    grid.indexToGridPoint(index1d, device_grid_point);
+    if (threadIdx.x == 0 && blockIdx.x == 0) {
+        grid.indexToGridPoint(index1d, device_grid_point);
+    }
 }
 
 // END put in cudaGridKernels.cuh?

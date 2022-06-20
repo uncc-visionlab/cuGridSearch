@@ -14,7 +14,8 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-/* 
+
+/*
  * File:   cudaMatrix.cuh
  * Author: arwillis
  *
@@ -30,12 +31,16 @@
 #include <iostream>
 #include <numeric>
 #include <string>
+#include <cstdint>
 #include <vector>
 #include <cuda/std/limits>
 
 // forward declare the CudaTensor class to allow __global__ CudaTensor kernel function declarations
 template<typename precision, unsigned int D>
 class CudaTensor;
+
+template<typename precision>
+class CudaMatrix;
 
 // declare all CudaTensor __global__ kernel functions (in cudaTensorKernels.cuh) so they can be used in the CudaTensor
 // class template definition
@@ -60,6 +65,24 @@ findExtremaProcess(CudaTensor<precision, D> tensor,
 
 template<typename precision, int els_per_block, int threads>
 __global__ void find_min_max(precision *in, precision *out);
+
+template<typename precision, uint32_t blockSize>
+__global__ void multiplyProcess(const CudaMatrix<precision> A, const CudaMatrix<precision> B, CudaMatrix<precision> C);
+
+void cudaMemcpyStrided(
+        void *dst, int dstStride,
+        void *src, int srcStride,
+        int numElements, int elementSize, enum cudaMemcpyKind kind) {
+    int srcPitchInBytes = srcStride * elementSize;
+    int dstPitchInBytes = dstStride * elementSize;
+    int width = 1 * elementSize;
+    int height = numElements;
+    cudaMemcpy2D(
+            dst, dstPitchInBytes,
+            src, srcPitchInBytes,
+            width, height,
+            kind);
+}
 
 #define ck(x) x
 typedef unsigned int uint32_t;
@@ -121,14 +144,6 @@ struct __align__(16) CudaTensor {
         return 0;
     }
 
-    CUDAFUNCTION int32_t width() const {
-        return (int32_t) ((D == 2) ? _dims[0] : -1);
-    }
-
-    CUDAFUNCTION int32_t height() const {
-        return (int32_t) ((D == 2) ? _dims[1] : -1);
-    }
-
     CUDAFUNCTION precision &at(const uint32_t (&pt)[D]) const {
         return _data[toIndex1d(pt)];
     }
@@ -138,16 +153,11 @@ struct __align__(16) CudaTensor {
     }
 
     template<typename T>
-    CUDAFUNCTION int toIndex(T x, T y) const {
-        return toIndex1d({x, y});
-    }
-
-    template<typename T>
     CUDAFUNCTION int toIndex1d(const T (&axis_index)[D]) const {
         // calculate 1-dimensional index from multi-dimensional index
-        int indexEncoding = 0;
+        int indexEncoding = axis_index[0];
 #pragma unroll
-        for (int axis = 0; axis < D; axis++) {
+        for (int axis = 1; axis < D; axis++) {
             indexEncoding += _dimensional_increments[axis] * axis_index[axis];
         }
         return indexEncoding;
@@ -245,52 +255,37 @@ struct __align__(16) CudaTensor {
      *
      * @param name - The matrix name
      */
-    void display(const std::string &name = "") const {
+    virtual void display(const std::string &name = "") const {
         precision *hostValues;
 
         ck(cudaMallocHost(&hostValues, bytesSize()));
         ck(cudaMemcpy(hostValues, _data, bytesSize(), cudaMemcpyDeviceToHost));
 
-        std::cout << "Matrix " << name << " ";
+        std::cout << "Tensor " << name << " ";
         for (int d = 0; d < D; d++) {
             std::cout << _dims[d] << ((d < D - 1) ? " x " : "");
         }
         std::cout << " elements of " << typeid(precision).name() << "\n\n";
 
-        if (D != 2) {
-            std::cout << "{ ";
-            for (int i = 0; i < _total_size; ++i) {
-                //for (int j = 0; j < _width - 1; ++j) {
-                std::cout << *(hostValues + i) << ((i < _total_size - 1) ? ", " : " ");
-                //}
-                //std::cout << *(hostValues + (i + 1) * _width - 1) << " }\n";
-            }
-            std::cout << "} ";
-        } else {
-            for (int row = 0; row < _dims[1]; ++row) {
-                std::cout << "{ ";
-                for (int col = 0; col < _dims[0] - 1; ++col) {
-                    std::cout << hostValues[toIndex(col, row)] << ((row < _total_size - 1) ? ", " : " ");
-                }
-                std::cout << hostValues[toIndex(_dims[0] - 1, row)] << " }\n";
-            }
+        std::cout << "{ ";
+        for (int i = 0; i < _total_size; ++i) {
+            //for (int j = 0; j < _width - 1; ++j) {
+            std::cout << *(hostValues + i) << ((i < _total_size - 1) ? ", " : " ");
+            //}
+            //std::cout << *(hostValues + (i + 1) * _width - 1) << " }\n";
         }
+        std::cout << "} ";
         std::cout << std::endl;
 
         ck(cudaFreeHost(hostValues));
     }
 
-    void setRowFromVector(int row_index, const std::vector<precision> vals) const {
-        if (D == 2) {
-            cudaMemcpy(((*this)._data + row_index * _dims[0]), vals.data(), vals.size() * sizeof(precision),
-                       cudaMemcpyHostToDevice);
-        } else {
-            std::cout << "CudaTensor<" << typeid(precision).name() << D
-                      << ">::setRowFromVector() not supported for tensors of dimension D = " << D << std::endl;
-        }
+    virtual void setRowFromVector(int row_index, const std::vector<precision> &vals) {
+        std::cout << "CudaTensor<" << typeid(precision).name() << D
+                  << ">::setRowFromVector() not supported for tensors of dimension D = " << D << std::endl;
     }
 
-    void setValuesFromVector(const std::vector<precision> vals) const {
+    void setValuesFromVector(const std::vector<precision> &vals) const {
         cudaMemcpy((*this)._data, vals.data(), vals.size() * sizeof(precision), cudaMemcpyHostToDevice);
     }
 
@@ -316,7 +311,21 @@ struct __align__(16) CudaTensor {
         return *this;
     }
 
-//    CudaMatrix &operator=(CudaMatrix m);
+    CudaTensor &operator=(CudaTensor &m) {
+        assert(this->_total_size = m._total_size);
+        assert(this->data() != nullptr);
+        _dimensional_increments[0] = 1;
+        _dims[0] = m._dims[0];
+        _total_size = m._dims[0];
+#pragma unroll
+        for (int d = 1; d < D; d++) {
+            _dims[d] = m._dims[d];
+            _total_size *= _dims[d];
+            _dimensional_increments[d] = _dims[d - 1] * _dimensional_increments[d - 1];
+        }
+        cudaMemcpy(this->data(), m.data(), m.bytesSize(), cudaMemcpyDeviceToDevice);
+        return *this;
+    }
 
     CudaTensor operator+=(const CudaTensor &m) {
         return transform(m, [=] __device__(precision x, precision y) { return x + y; });
@@ -334,41 +343,182 @@ struct __align__(16) CudaTensor {
 template<typename precision>
 struct CudaMatrix : public CudaTensor<precision, 2> {
 
-    CUDAFUNCTION CudaMatrix(uint32_t width, uint32_t height) :
-            CudaTensor<precision, 2>({width, height}) {
+    CUDAFUNCTION CudaMatrix(uint32_t rows, uint32_t columns) :
+            CudaTensor<precision, 2>({columns, rows}) {
+    }
+
+    CUDAFUNCTION int32_t width() const {
+        return (int32_t) this->_dims[0];
+    }
+
+    CUDAFUNCTION int32_t height() const {
+        return (int32_t) this->_dims[1];
+    }
+
+    template<typename T>
+    CUDAFUNCTION int toIndex(T y, T x) const {
+        return CudaTensor<precision, 2>::toIndex1d({x, y});
+    }
+
+    template<typename T>
+    CUDAFUNCTION precision &at(T row_index, T column_index) const {
+        return this->_data[toIndex(row_index, column_index)];
+    }
+
+    /**
+     * Display the matrix
+     *
+     * @tparam precision - The matrix precision
+     *
+     * @param name - The matrix name
+     */
+    void display(const std::string &name = "") const {
+        precision *hostValues;
+
+        ck(cudaMallocHost(&hostValues, this->bytesSize()));
+        ck(cudaMemcpy(hostValues, this->_data, this->bytesSize(), cudaMemcpyDeviceToHost));
+
+        std::cout << "Matrix " << name << " ";
+        std::cout << this->_dims[1] << " x " << this->_dims[0];
+        std::cout << " elements of " << typeid(precision).name() << "\n\n";
+
+        for (int row = 0; row < this->_dims[1]; ++row) {
+            std::cout << "{ ";
+            for (int col = 0; col < this->_dims[0] - 1; ++col) {
+                std::cout << hostValues[toIndex(row, col)] << ((row < this->_total_size - 1) ? ", " : " ");
+            }
+            std::cout << hostValues[toIndex(row, this->_dims[0] - 1)] << " }\n";
+        }
+        std::cout << std::endl;
+
+        ck(cudaFreeHost(hostValues));
+    }
+
+    /**
+    * Sets the values of the matrix diagonal to a constant.
+    *
+    * @tparam precision - The matrix precision
+    *
+    * @param value - The value to put into diagonal elements
+    *
+    */
+    void setDiagonal(const precision value) {
+        std::vector<precision> values(this->height(), value);
+        cudaMemcpyStrided(this->data(), this->width() + 1, values.data(), 1, this->height(), sizeof(precision),
+                          cudaMemcpyHostToDevice);
+    }
+
+    /**
+    * Sets the values of the matrix column from a standard template vector.
+    *
+    * @tparam precision - The matrix precision
+    *
+    * @param values - The vector of value to put into the columns elements
+    *
+    */
+    void setColumnFromVector(int column_index, const std::vector<precision> &values) {
+        assert(column_index < this->width());
+        assert(values.size() == this->height());
+        cudaMemcpyStrided((void *) (this->data() + column_index), this->width(), (void *) values.data(), 1,
+                          this->height(),
+                          sizeof(precision),
+                          cudaMemcpyHostToDevice);
+    }
+
+    /**
+    * Sets the values of the matrix row from a standard template vector.
+    *
+    * @tparam precision - The matrix precision
+    *
+    * @param values - The vector of value to put into the columns elements
+    *
+    */
+    void setRowFromVector(int row_index, const std::vector<precision> &values) {
+        assert(row_index < this->height());
+        assert(values.size() == this->width());
+        cudaMemcpy(this->data() + row_index * this->width(), values.data(), this->width() * sizeof(precision),
+                   cudaMemcpyHostToDevice);
+    }
+
+    /**
+    * Sets the matrix to the identity matrix.
+    *
+    * @tparam precision - The matrix precision
+    *
+    */
+    void setIdentity() {
+        std::vector<precision> values(this->size(), 0);
+        for (uint32_t d = 0; d < values.size(); d += this->width() + 1) {
+            values[d] = 1;
+        }
+        this->setValuesFromVector(values);
+    }
+
+    /**
+    * Multiply two matrices
+    *
+    * @tparam precision - The matrix precision
+    *
+    * @param A - The left matrix A
+    * @param B - The right matrix B
+    * @param C - The result matrix C = A * B
+    *
+    */
+    static void multiply(const CudaMatrix &A, const CudaMatrix &B, CudaMatrix &C) {
+        const uint32_t threadsPerBlock = 4;
+        dim3 threads(threadsPerBlock, threadsPerBlock);
+        dim3 grid((threadsPerBlock + C.width() - 1) / threads.x, (threadsPerBlock + C.height() - 1) / threads.y);
+
+        assert(A.width() == B.height());
+        assert(C.height() == A.height());
+        assert(C.width() == B.width());
+
+        multiplyProcess<precision, threadsPerBlock> <<< grid, threads >>>(A, B, C);
+    }
+
+    CudaMatrix &operator=(CudaMatrix &m) {
+        static_cast<CudaTensor<precision, 2> &>(*this) = m;
+        // ... copy member variables of CudaMatrix
+        return *this;
     }
 };
 
 template<typename precision>
 struct CudaImage : public CudaMatrix<precision> {
 
-    CUDAFUNCTION CudaImage(uint32_t _width, uint32_t _height) : CudaMatrix<precision>(_width, _height) {
+    CUDAFUNCTION CudaImage(uint32_t _height, uint32_t _width) : CudaMatrix<precision>(_height, _width) {
     }
 
     CUDAFUNCTION ~CudaImage() {
     }
 
-    CUDAFUNCTION bool inImage(float x, float y) const {
+    CudaImage &operator=(CudaImage &m) {
+        static_cast<CudaTensor<precision, 2> &>(*this) = m;
+        // ... copy member variables of CudaImage
+        return *this;
+    }
+
+    CUDAFUNCTION bool inImage(float y, float x) const {
         if (x >= 0 && y >= 0 && x < this->width() && y < this->height())
             return true;
         return false;
     }
 
-    CUDAFUNCTION float valueAt(float x, float y) const {
+    CUDAFUNCTION float valueAt(float y, float x) const {
         //return valueAt_nearest_neighbor(x, y);
-        return valueAt_bilinear(x, y);
+        return valueAt_bilinear(y, x);
     }
 
-    CUDAFUNCTION float valueAt_nearest_neighbor(float x, float y) const {
-        return (this->inImage(x, y)) ? this->_data[this->toIndex(x, y)] : cuda::std::numeric_limits<float>::infinity();
+    CUDAFUNCTION float valueAt_nearest_neighbor(float y, float x) const {
+        return (this->inImage(y, x)) ? this->_data[this->toIndex(y, x)] : cuda::std::numeric_limits<float>::infinity();
     }
 
-    CUDAFUNCTION float valueAt_bilinear(float x, float y) const {
-        if (this->inImage(x, y)) {
-            float tlc = this->_data[this->toIndex(floor(x), floor(y))];
-            float trc = this->_data[this->toIndex(ceil(x), floor(y))];
-            float blc = this->_data[this->toIndex(floor(x), ceil(y))];
-            float brc = this->_data[this->toIndex(ceil(x), ceil(y))];
+    CUDAFUNCTION float valueAt_bilinear(float y, float x) const {
+        if (this->inImage(y, x)) {
+            float tlc = this->_data[this->toIndex(floor(y), floor(x))];
+            float trc = this->_data[this->toIndex(ceil(y), floor(x))];
+            float blc = this->_data[this->toIndex(floor(y), ceil(x))];
+            float brc = this->_data[this->toIndex(ceil(y), ceil(x))];
             float alpha_x = x - floor(x);
             float alpha_y = y - floor(y);
             float value_top = (1.0f - alpha_x) * tlc + alpha_x * trc;
@@ -383,23 +533,31 @@ struct CudaImage : public CudaMatrix<precision> {
 template<typename precision>
 struct CudaVector : public CudaMatrix<precision> {
 
-    CUDAFUNCTION CudaVector() : CudaMatrix<precision>(1, 0) {
+    CUDAFUNCTION CudaVector(uint32_t _dim) : CudaMatrix<precision>(_dim, 1) {
     }
 
-    CUDAFUNCTION CudaVector(uint32_t _dim) : CudaMatrix<precision>(1, _dim) {
+    CUDAFUNCTION CudaVector(CudaTensor<precision, 2> &m) : CudaMatrix<precision>(m._dims[1], 1) {
+
     }
 
     CUDAFUNCTION ~CudaVector() {
     }
 
-    template<typename T>
-    CUDAFUNCTION int toIndex(T column_index) const {
-        return toIndex(column_index, 0);
+    CudaVector &operator=(CudaVector &m) {
+        static_cast<CudaTensor<precision, 2> &>(*this) = m;
+        // ... copy member variables of CudaVector
+        return *this;
     }
 
-    CUDAFUNCTION precision &at(int column_index) const {
-        return this->CudaMatrix<precision>::at(column_index, 0);
+    template<typename T>
+    CUDAFUNCTION int toIndex(T row_index) const {
+        return this->CudaMatrix<precision>::toIndex(row_index, 0);
     }
+
+    CUDAFUNCTION precision &at(int row_index) const {
+        return this->CudaMatrix<precision>::at(row_index, 0);
+    }
+
 };
 
 #include "cudaTensorKernels.cuh"

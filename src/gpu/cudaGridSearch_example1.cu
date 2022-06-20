@@ -90,7 +90,9 @@ int main(int argc, char **argv) {
     std::vector<grid_precision> start_point = {(grid_precision) -m2.width() / 2, (grid_precision) -m2.height() / 2};
     std::vector<grid_precision> end_point = {(grid_precision) std::abs(m1.width() - (m2.width() / 2)),
                                   (grid_precision) std::abs(m1.height() - (m2.height() / 2))};
+//    std::vector<grid_precision> resolution = {(grid_precision) 0.31f, (grid_precision) 0.31f};
     std::vector<grid_precision> resolution = {(grid_precision) 0.1f, (grid_precision) 0.1f};
+//    std::vector<grid_precision> resolution = {(grid_precision) 0.15f, (grid_precision) 0.15f};
 
     CudaGrid<grid_precision,grid_dimension> translation_xy_grid;
     ck(cudaMalloc(&translation_xy_grid.data(), translation_xy_grid.bytesSize()));

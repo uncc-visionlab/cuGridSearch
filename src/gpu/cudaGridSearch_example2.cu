@@ -78,7 +78,7 @@ int main(int argc, char **argv) {
     ck(cudaMalloc(&m2.data(), m2.bytesSize()));
 
     m1.setValuesFromVector(std::vector<pixel_precision>(imageA_data, imageA_data + 6 * 6));
-    m2.setValuesFromVector(std::vector<pixel_precision>(imageA_data, imageA_data + 6 * 6));
+    m2.setValuesFromVector(std::vector<pixel_precision>(imageC_data, imageC_data + 6 * 6));
 
     m1.display("m1");
     m2.display("m2");

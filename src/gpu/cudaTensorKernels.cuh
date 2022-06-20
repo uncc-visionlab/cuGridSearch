@@ -25,6 +25,8 @@
 #include <stdint.h>
 #include <cuda/std/limits>
 
+#include "cudaTensor.cuh"
+
 bool isPow2(unsigned int x) {
     return ((x & (x - 1)) == 0);
 }
@@ -248,52 +250,62 @@ findExtremaProcess(CudaTensor<precision, D> tensor,
     switch (blockDim.x) {
         case 512:
             reduceMin6<precision, 512>(tensor.data(), tensor_indices.data(),
-                                       device_block_extrema_values.data(), device_block_extrema_indices.data(), tensor.size());
+                                       device_block_extrema_values.data(), device_block_extrema_indices.data(),
+                                       tensor.size());
             break;
 
         case 256:
             reduceMin6<precision, 256>(tensor.data(), tensor_indices.data(),
-                                       device_block_extrema_values.data(), device_block_extrema_indices.data(), tensor.size());
+                                       device_block_extrema_values.data(), device_block_extrema_indices.data(),
+                                       tensor.size());
             break;
 
         case 128:
             reduceMin6<precision, 128>(tensor.data(), tensor_indices.data(),
-                                       device_block_extrema_values.data(), device_block_extrema_indices.data(), tensor.size());
+                                       device_block_extrema_values.data(), device_block_extrema_indices.data(),
+                                       tensor.size());
             break;
 
         case 64:
             reduceMin6<precision, 64>(tensor.data(), tensor_indices.data(),
-                                      device_block_extrema_values.data(), device_block_extrema_indices.data(), tensor.size());
+                                      device_block_extrema_values.data(), device_block_extrema_indices.data(),
+                                      tensor.size());
             break;
 
         case 32:
             reduceMin6<precision, 32>(tensor.data(), tensor_indices.data(),
-                                      device_block_extrema_values.data(), device_block_extrema_indices.data(), tensor.size());
+                                      device_block_extrema_values.data(), device_block_extrema_indices.data(),
+                                      tensor.size());
             break;
 
         case 16:
             reduceMin6<precision, 16>(tensor.data(), tensor_indices.data(),
-                                      device_block_extrema_values.data(), device_block_extrema_indices.data(), tensor.size());
+                                      device_block_extrema_values.data(), device_block_extrema_indices.data(),
+                                      tensor.size());
             break;
 
         case 8:
             reduceMin6<precision, 8>(tensor.data(), tensor_indices.data(),
-                                     device_block_extrema_values.data(), device_block_extrema_indices.data(), tensor.size());
+                                     device_block_extrema_values.data(), device_block_extrema_indices.data(),
+                                     tensor.size());
             break;
 
         case 4:
             reduceMin6<precision, 4>(tensor.data(), tensor_indices.data(),
-                                     device_block_extrema_values.data(), device_block_extrema_indices.data(), tensor.size());
+                                     device_block_extrema_values.data(), device_block_extrema_indices.data(),
+                                     tensor.size());
             break;
 
         case 2:
             reduceMin6<precision, 2>(tensor.data(), tensor_indices.data(),
-                                     device_block_extrema_values.data(), device_block_extrema_indices.data(), tensor.size());
+                                     device_block_extrema_values.data(), device_block_extrema_indices.data(),
+                                     tensor.size());
             break;
 
         case 1:
             reduceMin6<precision, 1>(tensor.data(), tensor_indices.data(),
-                                     device_block_extrema_values.data(), device_block_extrema_indices.data(), tensor.size());
+                                     device_block_extrema_values.data(), device_block_extrema_indices.data(),
+                                     tensor.size());
             break;
     }
     __syncthreads();
@@ -332,6 +344,52 @@ __global__ void transformProcess(CudaTensor<precision, D> A,
     }
     // transform(*(A._data + x), *(B._data + x)) seems to return nothing but do not crash ...
     *(A._data + x) = transform(*(A._data + x), *(B._data + x));
+}
+
+template<typename precision, uint32_t blockSize>
+__global__ void
+multiplyProcess(const CudaMatrix<precision> A, const CudaMatrix<precision> B, CudaMatrix<precision> C) {
+    __shared__ precision As[blockSize][blockSize];
+    __shared__ precision Bs[blockSize][blockSize];
+    // Index of the first sub-matrix of B processed by the block
+    // We seek to compute the output value at row = A_row_index, column = B_col_index
+    uint32_t A_row_index = blockSize * blockIdx.y + threadIdx.y;
+    uint32_t B_col_index = blockSize * blockIdx.x + threadIdx.x;
+    // Csub is used to store the element of the block sub-matrix
+    // that is computed by the thread
+    precision Csub = 0;
+    // compute vector dot products for each thread at the stride of the blockSize
+    // each iteration will compute blockSize*blockSize elements of the output result
+    for (int block_offset = 0; block_offset <= A.width() - 1; block_offset += blockSize) {
+        // threads of the block populate a local shared memory matrix for A
+        if (block_offset + threadIdx.x < A.width() && A_row_index < A.height())
+            As[threadIdx.y][threadIdx.x] = A.at(A_row_index, block_offset + threadIdx.x);
+        else
+            As[threadIdx.y][threadIdx.x] = 0.0;
+
+        // threads of the block populate a local shared memory matrix for B
+        if (B_col_index < B.width() && block_offset + threadIdx.y < B.height())
+            Bs[threadIdx.y][threadIdx.x] = B.at(block_offset + threadIdx.y, B_col_index);
+        else
+            Bs[threadIdx.y][threadIdx.x] = 0.0;
+
+        // make sure the threads of the block have populated the local matrix A and B completely
+        __syncthreads();
+
+        // compute the dot product of row threadIdx.y of local matrix A with a column threadIdx.x of local matrix B
+#pragma unroll
+        for (int k = 0; k < blockSize; ++k)
+            Csub += As[threadIdx.y][k] * Bs[k][threadIdx.x];
+
+        // make sure the threads of the block have populated their Csub values
+        __syncthreads();
+
+        // repeat until we reach the end of the dot product when the block_offset index equals or exceeds A.width() - 1
+    }
+    // (threadIdx.x, threadIdx.y) calculates the value to put in matrix element (blockIdx.x*BS + threadIdx.x, blockIdx.y*BS + threadIdx.y)
+    if (A_row_index < C.height() && B_col_index < C.width()) {
+        C.at(A_row_index, B_col_index) = Csub;
+    }
 }
 
 #endif //CUDATENSORKERNELS_CUH

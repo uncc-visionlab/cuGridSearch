@@ -95,8 +95,8 @@ int main(int argc, char **argv) {
             .1, .1
     };
     std::vector<grid_precision> resolution = {
-            .1, .1, (grid_precision) 0.1f,
-            .1, .1, (grid_precision) 0.1f,
+            .1, .1, (grid_precision) 0.2f,
+            .1, .1, (grid_precision) 0.2f,
             .1, .1
     };
 
