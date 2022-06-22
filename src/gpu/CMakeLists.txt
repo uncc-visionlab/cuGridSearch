@@ -20,19 +20,19 @@ include_directories(
 add_executable(${PROJECT_NAME}_main
         cudaGridSearch_main.cu
         cudaErrorFunctions.cuh)
-target_compile_options(${PROJECT_NAME}_main PUBLIC --extended-lambda)
+target_compile_options(${PROJECT_NAME}_main PUBLIC --extended-lambda --expt-relaxed-constexpr)
 target_link_libraries(${PROJECT_NAME}_main -no-pie ${CUDA_LIBRARIES} ${CUDA_CUFFT_LIBRARIES})
 
 add_executable(cudaGridSearch_example1
         cudaGridSearch_example1.cu
         cudaErrorFunctions.cuh)
-target_compile_options(cudaGridSearch_example1 PUBLIC --extended-lambda)
+target_compile_options(cudaGridSearch_example1 PUBLIC --extended-lambda --expt-relaxed-constexpr)
 target_link_libraries(cudaGridSearch_example1 ${CUDA_LIBRARIES})
 
 add_executable(cudaGridSearch_example2
         cudaGridSearch_example2.cu
         cudaErrorFunctions.cuh)
-target_compile_options(cudaGridSearch_example2 PUBLIC --extended-lambda)
+target_compile_options(cudaGridSearch_example2 PUBLIC --extended-lambda --expt-relaxed-constexpr)
 target_link_libraries(cudaGridSearch_example2 ${CUDA_LIBRARIES})
 
 add_executable(cudaGridSearch_example3

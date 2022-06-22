@@ -90,14 +90,14 @@ int main(int argc, char **argv) {
             0, 0
     };
     std::vector<grid_precision> end_point = {
-            1, 0, (grid_precision) std::abs( m1.width() - (m2.width() / 2)),
-            0, 1, (grid_precision) std::abs( m1.height() - (m2.height() / 2)),
+            1, 0, (grid_precision) std::abs(m1.width() - (m2.width() / 2)),
+            0, 1, (grid_precision) std::abs(m1.height() - (m2.height() / 2)),
             .1, .1
     };
-    std::vector<grid_precision> resolution = {
-            .1, .1, (grid_precision) 0.2f,
-            .1, .1, (grid_precision) 0.2f,
-            .1, .1
+    std::vector<grid_precision> num_samples = {
+            10, 10, 100,
+            10, 10, 100,
+            10, 10
     };
 
     CudaGrid<grid_precision, grid_dimension> perspective_transform_grid;
@@ -105,7 +105,7 @@ int main(int argc, char **argv) {
 
     perspective_transform_grid.setStartPoint(start_point);
     perspective_transform_grid.setEndPoint(end_point);
-    perspective_transform_grid.setResolution(resolution);
+    perspective_transform_grid.setNumSamples(num_samples);
     perspective_transform_grid.display("perspective_xy_grid");
 
 
@@ -118,7 +118,8 @@ int main(int argc, char **argv) {
 
     // first template argument is the error function return type
     // second template argument is the grid point value type
-    CudaGridSearcher<func_precision, grid_precision, grid_dimension> perspective_transform_gridsearcher(perspective_transform_grid, func_values);
+    CudaGridSearcher<func_precision, grid_precision, grid_dimension> perspective_transform_gridsearcher(
+            perspective_transform_grid, func_values);
 
     // Copy device function pointer for the function having by-value parameters to host side
     cudaMemcpyFromSymbol(&host_func_byval_ptr, dev_func_byvalue_ptr,
@@ -136,8 +137,8 @@ int main(int argc, char **argv) {
     grid_precision min_grid_point[grid_dimension];
     perspective_transform_grid.getGridPoint(min_grid_point, min_value_index1d);
     std::cout << "Minimum found at point p = { ";
-    for (int d=0; d < grid_dimension; d++) {
-        std::cout << min_grid_point[d] << ((d < grid_dimension -1) ? ", " : " ");
+    for (int d = 0; d < grid_dimension; d++) {
+        std::cout << min_grid_point[d] << ((d < grid_dimension - 1) ? ", " : " ");
     }
     std::cout << "}" << std::endl;
 

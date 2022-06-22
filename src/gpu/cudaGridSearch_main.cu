@@ -48,8 +48,8 @@ typedef float pixel_precision; // the type of values in the image, e.g., float, 
 typedef func_byvalue_t<func_precision, grid_precision, grid_dimension, CudaImage<pixel_precision>, CudaImage<pixel_precision> > image_err_func_byvalue;
 
 // create device function pointer for by-value kernel function here
-//__device__ image_err_func_byvalue dev_func_byvalue_ptr = averageAbsoluteDifference<func_precision, grid_precision, grid_dimension, pixel_precision>;
-__device__ image_err_func_byvalue dev_func_byvalue_ptr = sumOfAbsoluteDifferences<func_precision, grid_precision, grid_dimension, pixel_precision>;
+__device__ image_err_func_byvalue dev_func_byvalue_ptr = averageAbsoluteDifference<func_precision, grid_precision, grid_dimension, pixel_precision>;
+//__device__ image_err_func_byvalue dev_func_byvalue_ptr = sumOfAbsoluteDifferences<func_precision, grid_precision, grid_dimension, pixel_precision>;
 
 #define cudaCheckErrors(msg) \
     do { \
@@ -145,15 +145,14 @@ int main(int argc, char **argv) {
     std::vector<grid_precision> start_point = {(grid_precision) -m2.width() / 2, (grid_precision) -m2.height() / 2};
     std::vector<grid_precision> end_point = {(grid_precision) std::abs(m1.width() - (m2.width() / 2)),
                                              (grid_precision) std::abs(m1.height() - (m2.height() / 2))};
-    std::vector<grid_precision> resolution = {(grid_precision) 0.0005f, (grid_precision) 0.0005f};
-//    std::vector<grid_precision> resolution = {(grid_precision) 0.1f, (grid_precision) 0.1f};
+    std::vector<grid_precision> num_samples = {(grid_precision) 10000, (grid_precision) 10000};
 
     CudaGrid<grid_precision, grid_dimension> translation_xy_grid;
     ck(cudaMalloc(&translation_xy_grid.data(), translation_xy_grid.bytesSize()));
 
     translation_xy_grid.setStartPoint(start_point);
     translation_xy_grid.setEndPoint(end_point);
-    translation_xy_grid.setResolution(resolution);
+    translation_xy_grid.setNumSamples(num_samples);
     translation_xy_grid.display("translation_xy_grid");
 
     grid_precision axis_sample_counts[grid_dimension];

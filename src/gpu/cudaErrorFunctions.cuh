@@ -29,7 +29,8 @@
 
 template<typename func_precision, typename grid_precision, unsigned int D, typename pixType>
 CUDAFUNCTION func_precision
-averageAbsoluteDifference(nv_ext::Vec<grid_precision, D> &t, CudaImage<pixType> img_moved, CudaImage<pixType> img_fixed) {
+averageAbsoluteDifference(nv_ext::Vec<grid_precision, D> &t, CudaImage<pixType> img_moved,
+                          CudaImage<pixType> img_fixed) {
     int num_errors = 0;
 //    printf("img_moved ptr %p\n", img_moved._data);
 //    printf("img_fixed ptr %p\n", img_fixed._data);
@@ -39,7 +40,7 @@ averageAbsoluteDifference(nv_ext::Vec<grid_precision, D> &t, CudaImage<pixType> 
             if (img_moved.inImage(y + t[1], x + t[0])) {
                 float image_moved_value = img_moved.valueAt(y + t[1], x + t[0]);
                 //if (image_moved_value != cuda::std::numeric_limits<float>::infinity()) {
-                sum_of_absolute_differences += std::abs(image_moved_value - img_fixed.valueAt(y, x));
+                sum_of_absolute_differences += abs(image_moved_value - img_fixed.valueAt(y, x));
                 num_errors++;
 //                printf("moved(%0.2f,%0.2f) - fixed(%0.2f,%0.2f) = %f - %f\n", (float) x + t[0], (float) y + t[1],
 //                       (float) x, (float) y, (float) image_moved_value,
@@ -56,7 +57,8 @@ averageAbsoluteDifference(nv_ext::Vec<grid_precision, D> &t, CudaImage<pixType> 
 
 template<typename func_precision, typename grid_precision, unsigned int D, typename pixType>
 CUDAFUNCTION func_precision
-sumOfAbsoluteDifferences(nv_ext::Vec<grid_precision, D> &t, CudaImage<pixType> img_moved, CudaImage<pixType> img_fixed) {
+sumOfAbsoluteDifferences(nv_ext::Vec<grid_precision, D> &t, CudaImage<pixType> img_moved,
+                         CudaImage<pixType> img_fixed) {
 //    printf("img_moved ptr %p\n", img_moved._data);
 //    printf("img_fixed ptr %p\n", img_fixed._data);
     float sum_of_absolute_differences = 0;
@@ -65,7 +67,7 @@ sumOfAbsoluteDifferences(nv_ext::Vec<grid_precision, D> &t, CudaImage<pixType> i
             if (img_moved.inImage(y + t[1], x + t[0])) {
                 float image_moved_value = img_moved.valueAt(y + t[1], x + t[0]);
                 //if (image_moved_value != cuda::std::numeric_limits<float>::infinity()) {
-                sum_of_absolute_differences += std::abs(image_moved_value - img_fixed.valueAt(y, x));
+                sum_of_absolute_differences += abs(image_moved_value - img_fixed.valueAt(y, x));
 //                printf("moved(%0.2f,%0.2f) - fixed(%0.2f,%0.2f) = %f - %f\n", (float) x + t[0], (float) y + t[1],
 //                       (float) x, (float) y, (float) image_moved_value,
 //                       (float) img_fixed.valueAt(x, y));
@@ -83,7 +85,8 @@ sumOfAbsoluteDifferences(nv_ext::Vec<grid_precision, D> &t, CudaImage<pixType> i
 
 template<typename func_precision, typename grid_precision, unsigned int D, typename pixType>
 CUDAFUNCTION func_precision
-averageAbsoluteDifference(nv_ext::Vec<grid_precision, D> &t, CudaImage<pixType> *img_moved, CudaImage<pixType> *img_fixed) {
+averageAbsoluteDifference(nv_ext::Vec<grid_precision, D> &t, CudaImage<pixType> *img_moved,
+                          CudaImage<pixType> *img_fixed) {
     int num_errors = 0;
 //    printf("img_moved ptr %p\n", img_moved);
 //    printf("img_fixed ptr %p\n", img_fixed);
@@ -105,7 +108,8 @@ averageAbsoluteDifference(nv_ext::Vec<grid_precision, D> &t, CudaImage<pixType> 
 
 template<typename func_precision, typename grid_precision, unsigned int D, typename pixType>
 CUDAFUNCTION func_precision
-sumOfAbsoluteDifferences(nv_ext::Vec<grid_precision, D> &t, CudaImage<pixType> *img_moved, CudaImage<pixType> *img_fixed) {
+sumOfAbsoluteDifferences(nv_ext::Vec<grid_precision, D> &t, CudaImage<pixType> *img_moved,
+                         CudaImage<pixType> *img_fixed) {
 //    printf("img_moved ptr %p\n", img_moved);
 //    printf("img_fixed ptr %p\n", img_fixed);
 //    printf("img_moved data ptr %p\n", img_moved->_data);
@@ -123,18 +127,19 @@ sumOfAbsoluteDifferences(nv_ext::Vec<grid_precision, D> &t, CudaImage<pixType> *
     return (func_precision) sum_of_absolute_differences;
 }
 
-template<typename func_precision, typename grid_precision, unsigned int D=8, typename pixType>
+template<typename func_precision, typename grid_precision, unsigned int D = 8, typename pixType>
 CUDAFUNCTION func_precision
-averageAbsoluteDifferenceH(nv_ext::Vec<grid_precision, D> &H, CudaImage<pixType> img_moved, CudaImage<pixType> img_fixed) {
+averageAbsoluteDifferenceH(nv_ext::Vec<grid_precision, D> &H, CudaImage<pixType> img_moved,
+                           CudaImage<pixType> img_fixed) {
     int num_errors = 0;
 //    printf("img_moved ptr %p\n", img_moved._data);
 //    printf("img_fixed ptr %p\n", img_fixed._data);
     float sum_of_absolute_differences = 0;
     for (int x = 0; x < img_fixed.width(); x++) {
         for (int y = 0; y < img_fixed.height(); y++) {
-            float z_p = H[6]*x + H[7]*y + 1.0;
-            float y_p = (H[3]*x + H[4]*y + H[5]) / z_p;
-            float x_p = (H[0]*x + H[1]*y + H[2]) / z_p;
+            float z_p = H[6] * x + H[7] * y + 1.0;
+            float y_p = (H[3] * x + H[4] * y + H[5]) / z_p;
+            float x_p = (H[0] * x + H[1] * y + H[2]) / z_p;
             if (img_moved.inImage(y_p, x_p)) {
                 float image_moved_value = img_moved.valueAt(y_p, x_p);
                 //if (image_moved_value != cuda::std::numeric_limits<float>::infinity()) {

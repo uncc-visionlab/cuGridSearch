@@ -207,8 +207,9 @@ struct CudaGrid : private CudaMatrix<precision> {
     }
 
     template<typename T>
-    void setResolution(std::vector<T> resolution) {
-        this->setRowFromVector(ROW_IDX_RESOLUTION, resolution);
+    void setNumSamples(std::vector<T> resolution) {
+        //this->setRowFromVector(ROW_IDX_RESOLUTION, resolution);
+        this->setRowFromVector(ROW_IDX_SAMPLE_COUNT, resolution);
         update();
     }
 
@@ -237,11 +238,34 @@ __global__ void updateProcess(CudaGrid<precision, D> grid, int changed_axis) {
     precision *resolutionArr = grid.resolution();
     precision *axis_sample_countArr = grid.axis_sample_count();
     if (changed_axis >= 0 && changed_axis < D) {
-        axis_sample_countArr[changed_axis] =
-                (int) (end_pointArr[changed_axis] - start_pointArr[changed_axis]) / resolutionArr[changed_axis];
+//        if (abs(end_pointArr[changed_axis] - start_pointArr[changed_axis]) <
+//            cuda::std::numeric_limits<precision>::epsilon() * axis_sample_countArr[changed_axis]) {
+        if (abs(end_pointArr[changed_axis] - start_pointArr[changed_axis]) <
+            1.0e-7 * axis_sample_countArr[changed_axis]) {
+            printf("Requested step size is too small modifying axis sampling on axis index %d\n", changed_axis);
+            axis_sample_countArr[changed_axis] = 1;
+        }
+        if (axis_sample_countArr[changed_axis] == 1) {
+            resolutionArr[changed_axis] = 2 * (end_pointArr[changed_axis] - start_pointArr[changed_axis]);
+        } else {
+            resolutionArr[changed_axis] =
+                    (int) (end_pointArr[changed_axis] - start_pointArr[changed_axis]) /
+                    (axis_sample_countArr[changed_axis] - 1);
+        }
     } else {
         for (int axis = 0; axis < D; axis++) {
-            axis_sample_countArr[axis] = (int) 1 + (end_pointArr[axis] - start_pointArr[axis]) / resolutionArr[axis];
+            //assert(axis_sample_countArr[axis] >= 1);
+//            if (abs(end_pointArr[axis] - start_pointArr[axis]) <
+//                cuda::std::numeric_limits<precision>::epsilon() * axis_sample_countArr[changed_axis]) {
+            if (abs(end_pointArr[axis] - start_pointArr[axis]) < 1.0e-7 * axis_sample_countArr[axis]) {
+                printf("Requested step size is too small modifying axis sampling on axis index %d\n", axis);
+                axis_sample_countArr[axis] = 1;
+            }
+            if (axis_sample_countArr[axis] == 1) {
+                resolutionArr[axis] = 2 * (end_pointArr[changed_axis] - start_pointArr[changed_axis]);
+            } else {
+                resolutionArr[axis] = (end_pointArr[axis] - start_pointArr[axis]) / (axis_sample_countArr[axis] - 1);
+            }
         }
     }
 }
@@ -272,10 +296,11 @@ __global__ void evaluationKernel_by_value(CudaGrid<grid_precision, D> grid,
     }
 //    grid_precision *grid_point = new grid_precision[D];
     grid_precision grid_point[D];// = new grid_precision[D];
-    if (threadIndex > 300000) {
+//    if (threadIndex > 300000) {
 //        printf("index = %d\n", threadIndex);
-    }
+//    }
     grid.indexToGridPoint(threadIndex, grid_point);
+#pragma unroll
     for (int d = 0; d < D; d++) {
         gridpt[d] = grid_point[d];
     }
@@ -303,6 +328,7 @@ __global__ void evaluationKernel_by_reference(CudaGrid<grid_precision, D> grid,
     grid_precision *grid_point = new grid_precision[D];
 //    printf("index = %d ", threadIndex);
     grid.indexToGridPoint(threadIndex, grid_point);
+#pragma unroll
     for (int d = 0; d < D; d++) {
         gridpt[d] = grid_point[d];
     }

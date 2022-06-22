@@ -142,6 +142,8 @@ __device__ void reduceMin6(T *g_idata, int *g_idxs, T *g_odata, int *g_oIdxs,
     unsigned int tid = threadIdx.x;
     unsigned int i = blockIdx.x * blockSize * 2 + threadIdx.x;
     unsigned int gridSize = blockSize * 2 * gridDim.x;
+//    unsigned int i = blockIdx.x * blockSize + threadIdx.x;
+//    unsigned int gridSize = blockSize *  gridDim.x;
 
     T myMin = cuda::std::numeric_limits<T>::infinity();
     int myMinIdx = -1;
@@ -157,12 +159,12 @@ __device__ void reduceMin6(T *g_idata, int *g_idxs, T *g_odata, int *g_oIdxs,
             myMinIdx = MIN_IDX(g_idata[i + blockSize], myMin, g_idxs[i + blockSize], myMinIdx);
             myMin = MIN(g_idata[i + blockSize], myMin);
         }
-//        if (tid == 0 && blockIdx.x == 0) {
+//        if (tid == 0 && blockIdx.x == 1) {
 //            printf("(thread,block)=(%d,%d):: i1=%d, i2=%d, n=%d, myMin = %f, myMinIdx=%d\n", tid, blockIdx.x, i, i + blockSize, n, myMin, myMinIdx);
 //        }
         i += gridSize;
     }
-    // each thread puts its local sum into shared memory
+    // each thread puts its local min and min index into shared memory
     sdata[tid] = myMin;
     sdataIdx[tid] = myMinIdx;
     __syncthreads();
@@ -207,9 +209,11 @@ __device__ void reduceMin6(T *g_idata, int *g_idxs, T *g_odata, int *g_oIdxs,
 //            }
         }
     }
-    __syncthreads();
+    // threads within a warp are already synchronized
+//    __syncthreads();
     // write result for this block to global mem
     if (tid == 0) {
+//        printf("blockIdx[%d] min is = %f with index = %d\n",blockIdx.x, myMin, myMinIdx);
         g_odata[blockIdx.x] = myMin;
         g_oIdxs[blockIdx.x] = myMinIdx;
     }
@@ -308,21 +312,21 @@ findExtremaProcess(CudaTensor<precision, D> tensor,
                                      tensor.size());
             break;
     }
-    __syncthreads();
+//    __syncthreads();
     // compute global min
-    if (blockIdx.x == 0 && threadIdx.x == 0) {
-        precision &extrema_value = device_block_extrema_values[0];
-        int32_t &extrema_index1d = device_block_extrema_indices[0];
-        for (int i = 1; i < gridDim.x; i++) {
-//            printf("\n Reduce MIN GPU idx: %d  value: %f", device_block_extrema_indices[i], device_block_extrema_values[i]);
-            if (device_block_extrema_values[i] < extrema_value) {
-                extrema_value = device_block_extrema_values[i];
-                extrema_index1d = device_block_extrema_indices[i];
-            }
-        }
-        printf("\n Grid MIN value has idx: %d  value: %f", extrema_index1d, extrema_value);
-        // decode the index to a grid point and put in the device_block_extrema_values at indices [1, ..., D]
-    }
+//    if (blockIdx.x == 0 && threadIdx.x == 0) {
+//        precision &extrema_value = device_block_extrema_values[0];
+//        int32_t &extrema_index1d = device_block_extrema_indices[0];
+//        for (int i = 1; i < gridDim.x; i++) {
+////            printf("\n Reduce MIN GPU idx: %d  value: %f", device_block_extrema_indices[i], device_block_extrema_values[i]);
+//            if (device_block_extrema_values[i] < extrema_value) {
+//                extrema_value = device_block_extrema_values[i];
+//                extrema_index1d = device_block_extrema_indices[i];
+//            }
+//        }
+//        printf("\n Grid MIN value has idx: %d  value: %f", extrema_index1d, extrema_value);
+//        // decode the index to a grid point and put in the device_block_extrema_values at indices [1, ..., D]
+//    }
 }
 
 /**

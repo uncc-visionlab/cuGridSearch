@@ -86,14 +86,14 @@ int main(int argc, char **argv) {
     std::vector<grid_precision> start_point = {(grid_precision) -m2.width() / 2, (grid_precision) -m2.height() / 2};
     std::vector<grid_precision> end_point = {(grid_precision) std::abs(m1.width() - (m2.width() / 2)),
                                              (grid_precision) std::abs(m1.height() - (m2.height() / 2))};
-    std::vector<grid_precision> resolution = {(grid_precision) 1.0f, (grid_precision) 1.0f};
+    std::vector<grid_precision> num_samples = {(grid_precision) 103, (grid_precision) 111};
 
     CudaGrid<grid_precision, grid_dimension> translation_xy_grid;
     ck(cudaMalloc(&translation_xy_grid.data(), translation_xy_grid.bytesSize()));
 
     translation_xy_grid.setStartPoint(start_point);
     translation_xy_grid.setEndPoint(end_point);
-    translation_xy_grid.setResolution(resolution);
+    translation_xy_grid.setNumSamples(num_samples);
     translation_xy_grid.display("translation_xy_grid");
 
 

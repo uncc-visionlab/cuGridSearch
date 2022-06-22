@@ -235,13 +235,13 @@ struct __align__(16) CudaTensor {
         extrema_value = host_block_extrema_values[0];
         extrema_index1d = host_block_extrema_indices[0];
         //printf("\n Reduce MIN GPU idx: %d  value: %f", host_block_extrema_indices[0], host_block_extrema_values[0]);
-//        for (int i = 1; i < numBlocks; i++) {
+        for (int i = 1; i < numBlocks; i++) {
 //            printf("\n Reduce MIN GPU idx: %d  value: %f", host_block_extrema_indices[i], host_block_extrema_values[i]);
-//            if (host_block_extrema_values[i] < extrema_value) {
-//                extrema_value = host_block_extrema_values[i];
-//                extrema_index1d = host_block_extrema_indices[i];
-//            }
-//        }
+            if (host_block_extrema_values[i] < extrema_value) {
+                extrema_value = host_block_extrema_values[i];
+                extrema_index1d = host_block_extrema_indices[i];
+            }
+        }
         printf("\n Grid MIN value has idx: %d  value: %f\n", extrema_index1d, extrema_value);
         ck(cudaFree(device_block_extrema_values.data()));
         ck(cudaFree(device_block_extrema_indices.data()));
@@ -255,7 +255,8 @@ struct __align__(16) CudaTensor {
      *
      * @param name - The matrix name
      */
-    virtual void display(const std::string &name = "") const {
+    void
+    display(const std::string &name = "", uint32_t row_stride = cuda::std::numeric_limits<uint32_t>::max()) const {
         precision *hostValues;
 
         ck(cudaMallocHost(&hostValues, bytesSize()));
@@ -271,6 +272,9 @@ struct __align__(16) CudaTensor {
         for (int i = 0; i < _total_size; ++i) {
             //for (int j = 0; j < _width - 1; ++j) {
             std::cout << *(hostValues + i) << ((i < _total_size - 1) ? ", " : " ");
+            if ((i + 1) % row_stride == 0) {
+                std::cout << std::endl;
+            }
             //}
             //std::cout << *(hostValues + (i + 1) * _width - 1) << " }\n";
         }
@@ -348,11 +352,11 @@ struct CudaMatrix : public CudaTensor<precision, 2> {
     }
 
     CUDAFUNCTION int32_t width() const {
-        return (int32_t) this->_dims[0];
+        return this->size(0);//(int32_t) this->_dims[0];
     }
 
     CUDAFUNCTION int32_t height() const {
-        return (int32_t) this->_dims[1];
+        return this->size(1);//(int32_t) this->_dims[1];
     }
 
     template<typename T>
@@ -485,7 +489,8 @@ struct CudaMatrix : public CudaTensor<precision, 2> {
 
 template<typename precision>
 struct CudaImage : public CudaMatrix<precision> {
-
+//#define OUTSIDE_IMAGE_VALUE cuda::std::numeric_limits<float>::infinity()
+#define OUTSIDE_IMAGE_VALUE 0
     CUDAFUNCTION CudaImage(uint32_t _height, uint32_t _width) : CudaMatrix<precision>(_height, _width) {
     }
 
@@ -499,9 +504,7 @@ struct CudaImage : public CudaMatrix<precision> {
     }
 
     CUDAFUNCTION bool inImage(float y, float x) const {
-        if (x >= 0 && y >= 0 && x < this->width() && y < this->height())
-            return true;
-        return false;
+        return (x >= 0 && y >= 0 && x < this->width() && y < this->height());
     }
 
     CUDAFUNCTION float valueAt(float y, float x) const {
@@ -509,15 +512,15 @@ struct CudaImage : public CudaMatrix<precision> {
         return valueAt_bilinear(y, x);
     }
 
-    CUDAFUNCTION float valueAt_nearest_neighbor(float y, float x) const {
-        return (this->inImage(y, x)) ? this->_data[this->toIndex(y, x)] : cuda::std::numeric_limits<float>::infinity();
+    CUDAFUNCTION precision valueAt_nearest_neighbor(float y, float x) const {
+        return (precision) ((this->inImage(y, x)) ? this->_data[this->toIndex(y, x)] : OUTSIDE_IMAGE_VALUE);
     }
 
     CUDAFUNCTION float valueAt_bilinear(float y, float x) const {
         if (this->inImage(y, x)) {
             float tlc = this->_data[this->toIndex(floor(y), floor(x))];
-            float trc = this->_data[this->toIndex(ceil(y), floor(x))];
-            float blc = this->_data[this->toIndex(floor(y), ceil(x))];
+            float trc = this->_data[this->toIndex(floor(y), ceil(x))];
+            float blc = this->_data[this->toIndex(ceil(y), floor(x))];
             float brc = this->_data[this->toIndex(ceil(y), ceil(x))];
             float alpha_x = x - floor(x);
             float alpha_y = y - floor(y);
@@ -526,7 +529,7 @@ struct CudaImage : public CudaMatrix<precision> {
             float value = (1.0f - alpha_y) * value_top + alpha_y * value_bottom;
             return value;
         }
-        return cuda::std::numeric_limits<float>::infinity();
+        return (precision) OUTSIDE_IMAGE_VALUE;
     }
 };
 
