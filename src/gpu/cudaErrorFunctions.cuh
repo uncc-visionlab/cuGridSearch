@@ -25,6 +25,8 @@
 #include <nvVectorNd.h>
 #include "cudaTensor.cuh"
 
+#include "cudaErrorFunction_mi.cuh"
+
 // An example of a device function with by-value arguments
 
 template<typename func_precision, typename grid_precision, unsigned int D, typename pixType>

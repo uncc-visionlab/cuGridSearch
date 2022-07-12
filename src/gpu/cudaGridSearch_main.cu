@@ -40,16 +40,26 @@
 #include "cudaGridSearch.cuh"
 #include "cudaErrorFunctions.cuh"
 
-#define grid_dimension 2        // the dimension of the grid, e.g., 1 => 1D grid, 2 => 2D grid, 3=> 3D grid, etc.
+#define STB_IMAGE_IMPLEMENTATION
+#define STBI_FAILURE_USERMSG
+#include "stb_image.h"
+
+#define PI 3.14159265
+
+#define grid_dimension 4        // the dimension of the grid, e.g., 1 => 1D grid, 2 => 2D grid, 3=> 3D grid, etc.
 typedef float grid_precision;   // the type of values in the grid, e.g., float, double, int, etc.
 typedef float func_precision;   // the type of values taken by the error function, e.g., float, double, int, etc.
-typedef float pixel_precision; // the type of values in the image, e.g., float, double, int, etc.
+typedef unsigned char pixel_precision; // the type of values in the image, e.g., float, double, int, etc.
 
-typedef func_byvalue_t<func_precision, grid_precision, grid_dimension, CudaImage<pixel_precision>, CudaImage<pixel_precision> > image_err_func_byvalue;
+// typedef func_byvalue_t<func_precision, grid_precision, grid_dimension, CudaImage<pixel_precision>, CudaImage<pixel_precision> > image_err_func_byvalue;
 
 // create device function pointer for by-value kernel function here
-__device__ image_err_func_byvalue dev_func_byvalue_ptr = averageAbsoluteDifference<func_precision, grid_precision, grid_dimension, pixel_precision>;
+// __device__ image_err_func_byvalue dev_func_byvalue_ptr = averageAbsoluteDifference<func_precision, grid_precision, grid_dimension, pixel_precision>;
 //__device__ image_err_func_byvalue dev_func_byvalue_ptr = sumOfAbsoluteDifferences<func_precision, grid_precision, grid_dimension, pixel_precision>;
+
+// grid_mi
+typedef func_byvalue_t<func_precision, grid_precision, grid_dimension, unsigned char*, unsigned char*, int, int, int, int> image_err_func_byvalue;
+__device__ image_err_func_byvalue dev_func_byvalue_ptr = grid_mi<func_precision, grid_precision, grid_dimension, pixel_precision>;
 
 #define cudaCheckErrors(msg) \
     do { \
@@ -130,22 +140,62 @@ int main(int argc, char **argv) {
     checkCudaErrors(cudaGetDevice(&cuda_device));
     checkCudaErrors(cudaGetDeviceProperties(&deviceProp, cuda_device));
 
-    CudaImage<pixel_precision> m1(6, 6);
-    CudaImage<pixel_precision> m2(6, 6);
+    // // Original
 
-    ck(cudaMalloc(&m1.data(), m1.bytesSize()));
-    ck(cudaMalloc(&m2.data(), m2.bytesSize()));
+    // CudaImage<pixel_precision> m1(6, 6);
+    // CudaImage<pixel_precision> m2(6, 6);
 
-    m1.setValuesFromVector(std::vector<pixel_precision>(imageA_data, imageA_data + 6 * 6));
-    m2.setValuesFromVector(std::vector<pixel_precision>(imageA_data, imageA_data + 6 * 6));
+    // ck(cudaMalloc(&m1.data(), m1.bytesSize()));
+    // ck(cudaMalloc(&m2.data(), m2.bytesSize()));
 
-    m1.display("m1");
-    m2.display("m2");
+    // m1.setValuesFromVector(std::vector<pixel_precision>(imageA_data, imageA_data + 6 * 6));
+    // m2.setValuesFromVector(std::vector<pixel_precision>(imageA_data, imageA_data + 6 * 6));
 
-    std::vector<grid_precision> start_point = {(grid_precision) -m2.width() / 2, (grid_precision) -m2.height() / 2};
-    std::vector<grid_precision> end_point = {(grid_precision) std::abs(m1.width() - (m2.width() / 2)),
-                                             (grid_precision) std::abs(m1.height() - (m2.height() / 2))};
-    std::vector<grid_precision> num_samples = {(grid_precision) 10000, (grid_precision) 10000};
+    // m1.display("m1");
+    // m2.display("m2");
+
+    // std::vector<grid_precision> start_point = {(grid_precision) -m2.width() / 2, (grid_precision) -m2.height() / 2};
+    // std::vector<grid_precision> end_point = {(grid_precision) std::abs(m1.width() - (m2.width() / 2)),
+    //                                          (grid_precision) std::abs(m1.height() - (m2.height() / 2))};
+    // std::vector<grid_precision> num_samples = {(grid_precision) 10000, (grid_precision) 10000};
+
+    // Mutual Information
+
+    if (argc < 3) {
+        printf("Args: FixedImage MovingImage\n");
+        return 1;
+    }
+
+    int xf, yf, nf;
+
+    unsigned char * dataf = stbi_load(argv[1], &xf, &yf, &nf, 1);
+    if(dataf == NULL) {
+        printf("Image failed to load!\n");
+        return 1;
+    }
+
+    int xm, ym, nm;
+
+    unsigned char * datam = stbi_load(argv[2], &xm, &ym, &nm, 1);
+    if(datam == NULL) {
+        printf("Image failed to load!\n");
+        return 1;
+    }
+
+    unsigned char* imagef;
+    checkCudaErrors(cudaMalloc(&imagef, xf*yf*sizeof(unsigned char)));
+    checkCudaErrors(cudaMemcpy(imagef, dataf, xf*yf*sizeof(unsigned char), cudaMemcpyHostToDevice));
+
+    unsigned char* imagem;
+    checkCudaErrors(cudaMalloc(&imagem, xm*ym*sizeof(unsigned char)));
+    checkCudaErrors(cudaMemcpy(imagem, datam, xm*ym*sizeof(unsigned char), cudaMemcpyHostToDevice));
+
+    checkCudaErrors(cudaDeviceSetLimit(cudaLimitMallocHeapSize,1<<30));
+
+    // Example MI
+    std::vector<grid_precision> start_point = {(grid_precision) -xm/2, (grid_precision) -ym/2, (grid_precision) 0, (grid_precision) 1};
+    std::vector<grid_precision> end_point =   {(grid_precision) xf-xm/2, (grid_precision) yf-ym/2, (grid_precision) 0, (grid_precision) 1};
+    std::vector<grid_precision> num_samples =  {(grid_precision) (xf+1), (grid_precision) (yf+1), (grid_precision) 1, (grid_precision) 1};
 
     CudaGrid<grid_precision, grid_dimension> translation_xy_grid;
     ck(cudaMalloc(&translation_xy_grid.data(), translation_xy_grid.bytesSize()));
@@ -172,7 +222,8 @@ int main(int argc, char **argv) {
                          sizeof(image_err_func_byvalue));
 
     //translation_xy_gridsearcher.search(host_func_byval_ptr, m1, m2);
-    translation_xy_gridsearcher.search_by_value(host_func_byval_ptr, m1, m2);
+    // translation_xy_gridsearcher.search_by_value(host_func_byval_ptr, m1, m2);
+    translation_xy_gridsearcher.search_by_value_stream(host_func_byval_ptr, 10000, imagem, imagef, xm, ym, xf, yf);
 
 //    func_values.display();
 
@@ -189,10 +240,13 @@ int main(int argc, char **argv) {
     std::cout << "}" << std::endl;
 
     // Clean memory
-    ck(cudaFree(m1.data()));
-    ck(cudaFree(m2.data()));
+    // ck(cudaFree(m1.data()));
+    // ck(cudaFree(m2.data()));
+    ck(cudaFree(imagef));
+    ck(cudaFree(imagem));
     ck(cudaFree(translation_xy_grid.data()));
     ck(cudaFree(func_values.data()));
-
+    stbi_image_free(dataf);
+    stbi_image_free(datam);
     return EXIT_SUCCESS;
 }
