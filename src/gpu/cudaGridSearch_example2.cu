@@ -118,7 +118,8 @@ int main(int argc, char **argv) {
     cudaMemcpyFromSymbol(&host_func_byref_ptr, dev_func_byref_ptr,
                          sizeof(image_err_func_byref));
 
-    translation_xy_gridsearcher.search_by_reference(host_func_byref_ptr, d_m1, d_m2);
+    // translation_xy_gridsearcher.search_by_reference(host_func_byref_ptr, d_m1, d_m2);
+    translation_xy_gridsearcher.search_by_reference_stream(host_func_byref_ptr, 10000, d_m1, d_m2);
 
 //    func_values.display();
 

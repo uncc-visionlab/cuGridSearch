@@ -126,7 +126,7 @@ int main(int argc, char **argv) {
                          sizeof(image_err_func_byvalue));
 
     //perspective_transform_gridsearcher.search(host_func_byval_ptr, m1, m2);
-    perspective_transform_gridsearcher.search_by_value(host_func_byval_ptr, m1, m2);
+    perspective_transform_gridsearcher.search_by_value_stream(host_func_byval_ptr, 10000, m1, m2);
 
 //    func_values.display();
 

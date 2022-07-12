@@ -312,6 +312,32 @@ __global__ void evaluationKernel_by_value(CudaGrid<grid_precision, D> grid,
 }
 
 template<typename func_precision, typename grid_precision, unsigned int D, typename ... Types>
+__global__ void evaluationKernel_by_value_stream(CudaGrid<grid_precision, D> grid,
+                                          func_precision *result,
+                                          uint32_t STREAM_BLOCK_DIM,
+                                          uint32_t stream_block_idx,
+                                          uint32_t stream_idx,
+                                          uint32_t max_thread_index,
+                                          func_byvalue_t<func_precision, grid_precision, D, Types...> op,
+                                          nv_ext::Vec<grid_precision, D> gridpt,
+                                          Types ... arg_vals) {
+
+    int threadIndex = stream_block_idx * STREAM_BLOCK_DIM + stream_idx;
+    if (threadIndex > max_thread_index) {
+        return;
+    }
+    
+    grid_precision grid_point[D];// = new grid_precision[D];
+
+    grid.indexToGridPoint(threadIndex, grid_point);
+#pragma unroll
+    for (int d = 0; d < D; d++) {
+        gridpt[d] = grid_point[d];
+    }
+    *(result + threadIndex) = (*op)(gridpt, arg_vals...);
+}
+
+template<typename func_precision, typename grid_precision, unsigned int D, typename ... Types>
 using func_byreference_t = func_precision (*)(nv_ext::Vec<grid_precision, D> &gridpt, Types *... arg_ptrs);
 
 template<typename func_precision, typename grid_precision, unsigned int D, typename ... Types>
@@ -339,6 +365,32 @@ __global__ void evaluationKernel_by_reference(CudaGrid<grid_precision, D> grid,
     delete[] grid_point;
 }
 
+// TODO: 
+template<typename func_precision, typename grid_precision, unsigned int D, typename ... Types>
+__global__ void evaluationKernel_by_reference_stream(CudaGrid<grid_precision, D> grid,
+                                              func_precision *result,
+                                              uint32_t STREAM_BLOCK_DIM,
+                                              uint32_t stream_block_idx,
+                                              uint32_t stream_idx,
+                                              uint32_t max_thread_index,
+                                              func_byreference_t<func_precision, grid_precision, D, Types...> op,
+                                              nv_ext::Vec<grid_precision, D> gridpt,
+                                              Types *... arg_ptrs) {
+
+    int threadIndex = stream_block_idx * STREAM_BLOCK_DIM + stream_idx;
+    if (threadIndex > max_thread_index) {
+        return;
+    }
+    grid_precision *grid_point = new grid_precision[D];
+    grid.indexToGridPoint(threadIndex, grid_point);
+#pragma unroll
+    for (int d = 0; d < D; d++) {
+        gridpt[d] = grid_point[d];
+    }
+    *(result + threadIndex) = (*op)(gridpt, arg_ptrs...);
+    delete[] grid_point;
+}
+
 template<typename func_precision, typename grid_precision, unsigned int D>
 struct CudaGridSearcher {
 #define BLOCK_DIM 512
@@ -355,6 +407,145 @@ struct CudaGridSearcher {
     template<typename ... Types>
     void search(func_byvalue_t<func_precision, grid_precision, D, Types ...> errorFunction, Types &... arg_vals) {
         search_by_value(errorFunction, arg_vals...);
+    }
+
+    // this will search a function with by-value arguments
+    // TODO: Update to take into stream block size argument (Before arg_vals?)
+    template<typename ... Types>
+    void
+    search_by_value_stream(func_byvalue_t<func_precision, grid_precision, D, Types ...> errorFunction, int STREAM_BLOCK_DIM, Types &... arg_vals) {
+
+        std::vector<grid_precision> point(_grid->getDimension(), 0);
+        uint32_t total_samples = _grid->numElements();
+        std::cout << "CudaGrid has " << total_samples << " search samples." << std::endl;
+
+        // allocate and initialize an array of stream handles
+        // Found out that creating 10000 kernel streams takes up 1 GB of GPU memory
+        // Need to use blocks to save on memory
+        int numStreamBlocks = 1;
+        int numStreams = STREAM_BLOCK_DIM;
+        if(total_samples < STREAM_BLOCK_DIM) numStreams = total_samples;
+        else numStreamBlocks = (total_samples + STREAM_BLOCK_DIM)/STREAM_BLOCK_DIM;
+        cudaStream_t *streams = new cudaStream_t[numStreams];
+
+        for (int i = 0; i < numStreams; i++) {
+            checkCudaErrors(cudaStreamCreate(&(streams[i])));
+        }
+
+        // create CUDA event handles
+        cudaEvent_t start_event, stop_event;
+        checkCudaErrors(cudaEventCreate(&start_event));
+        checkCudaErrors(cudaEventCreate(&stop_event));
+
+        // the events are used for synchronization only and hence do not need to
+        // record timings this also makes events not introduce global sync points when
+        // recorded which is critical to get overlap
+
+        cudaEvent_t *kernelEvent = new cudaEvent_t[numStreams];
+        
+
+        for (int i = 0; i < numStreams; i++) {
+            checkCudaErrors(
+                cudaEventCreateWithFlags(&(kernelEvent[i]), cudaEventDisableTiming));
+        }
+
+        // create grid point and result image
+        nv_ext::Vec<grid_precision, D> pt((grid_precision) 0.0f);
+
+        cudaEventRecord(start_event, 0);
+
+        // queue nkernels in separate streams and record when they are done
+        for (int i = 0; i < numStreamBlocks; ++i) {
+            // printf("Beginning Stream block %d\n",i);
+            printf("Progress %.2f%% (%d/%d search blocks)\r",(float)(i+1)*100/numStreamBlocks, i+1, numStreamBlocks);
+            for (int j = 0; j < numStreams; ++j) {
+                evaluationKernel_by_value_stream<<< 1,1,0,streams[j]>>>(*_grid, (*_result).data(), STREAM_BLOCK_DIM, i, j, total_samples, errorFunction,
+                pt, arg_vals...);
+                checkCudaErrors(cudaEventRecord(kernelEvent[j], streams[j]));
+        
+                // make the last stream wait for the kernel event to be recorded
+                checkCudaErrors(
+                    cudaStreamWaitEvent(streams[numStreams - 1], kernelEvent[j], 0));
+            }
+            checkCudaErrors(cudaEventRecord(stop_event, 0));
+            gpuErrchk(cudaPeekAtLastError());
+            checkCudaErrors(cudaEventSynchronize(stop_event));
+        }
+
+        delete[] streams;
+        delete[] kernelEvent;
+
+        cudaEventDestroy(start_event);
+        cudaEventDestroy(stop_event);
+    }
+
+    // this will search a function with by-reference arguments
+
+    template<typename ... Types>
+    void search_by_reference_stream(func_byreference_t<func_precision, grid_precision, D, Types ...> errorFunction,
+        int STREAM_BLOCK_DIM, Types *... arg_ptrs) {
+        std::vector<grid_precision> point(_grid->getDimension(), 0);
+        uint32_t total_samples = _grid->numElements();
+        std::cout << "CudaGrid has " << total_samples << " search samples." << std::endl;
+
+        // allocate and initialize an array of stream handles
+        // Found out that creating 10000 kernel streams takes up 1 GB of GPU memory
+        // Need to use blocks to save on memory
+        int numStreamBlocks = 1;
+        int numStreams = STREAM_BLOCK_DIM;
+        if(total_samples < STREAM_BLOCK_DIM) numStreams = total_samples;
+        else numStreamBlocks = (total_samples + STREAM_BLOCK_DIM)/STREAM_BLOCK_DIM;
+        cudaStream_t *streams = new cudaStream_t[numStreams];
+
+        for (int i = 0; i < numStreams; i++) {
+            checkCudaErrors(cudaStreamCreate(&(streams[i])));
+        }
+
+        // create CUDA event handles
+        cudaEvent_t start_event, stop_event;
+        checkCudaErrors(cudaEventCreate(&start_event));
+        checkCudaErrors(cudaEventCreate(&stop_event));
+
+        // the events are used for synchronization only and hence do not need to
+        // record timings this also makes events not introduce global sync points when
+        // recorded which is critical to get overlap
+
+        cudaEvent_t *kernelEvent = new cudaEvent_t[numStreams];
+        
+
+        for (int i = 0; i < numStreams; i++) {
+            checkCudaErrors(
+                cudaEventCreateWithFlags(&(kernelEvent[i]), cudaEventDisableTiming));
+        }
+
+        // create grid point and result image
+        nv_ext::Vec<grid_precision, D> pt((grid_precision) 0.0f);
+
+        cudaEventRecord(start_event, 0);
+
+        // queue nkernels in separate streams and record when they are done
+        for (int i = 0; i < numStreamBlocks; ++i) {
+            //printf("Beginning Stream block %d\n",i);
+            printf("Progress %.2f%% (%d/%d search blocks)\r",(float)(i+1)*100/numStreamBlocks, i+1, numStreamBlocks);
+            for (int j = 0; j < numStreams; ++j) {
+                evaluationKernel_by_reference_stream<<< 1,1,0,streams[j]>>>(*_grid, (*_result).data(), STREAM_BLOCK_DIM, i, j, total_samples, errorFunction,
+                pt, arg_ptrs...);
+                checkCudaErrors(cudaEventRecord(kernelEvent[j], streams[j]));
+        
+                // make the last stream wait for the kernel event to be recorded
+                checkCudaErrors(
+                    cudaStreamWaitEvent(streams[numStreams - 1], kernelEvent[j], 0));
+            }
+            checkCudaErrors(cudaEventRecord(stop_event, 0));
+            gpuErrchk(cudaPeekAtLastError());
+            checkCudaErrors(cudaEventSynchronize(stop_event));
+        }
+
+        delete[] streams;
+        delete[] kernelEvent;
+
+        cudaEventDestroy(start_event);
+        cudaEventDestroy(stop_event);
     }
 
     // this will search a function with by-value arguments
@@ -389,7 +580,7 @@ struct CudaGridSearcher {
 
     template<typename ... Types>
     void search_by_reference(func_byreference_t<func_precision, grid_precision, D, Types ...> errorFunction,
-                             Types *... arg_ptrs) {
+                            Types *... arg_ptrs) {
         std::vector<grid_precision> point(_grid->getDimension(), 0);
         uint32_t total_samples = _grid->numElements();
         std::cout << "CudaGrid has " << total_samples << " search samples." << std::endl;
@@ -406,10 +597,11 @@ struct CudaGridSearcher {
         nv_ext::Vec<grid_precision, D> pt((grid_precision) 0.0f);
 
         evaluationKernel_by_reference<<< gridDim, blockDim>>>(*_grid, (*_result).data(), total_samples, errorFunction,
-                                                              pt, arg_ptrs...);
+                                                            pt, arg_ptrs...);
         gpuErrchk(cudaPeekAtLastError());
         gpuErrchk(cudaDeviceSynchronize());
     }
+ 
 
 };
 
