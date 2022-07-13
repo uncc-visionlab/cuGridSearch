@@ -42,6 +42,7 @@
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_FAILURE_USERMSG
+#define STBI_NO_FAILURE_STRINGS
 #include "stb_image.h"
 
 #define PI 3.14159265
@@ -58,7 +59,7 @@ typedef unsigned char pixel_precision; // the type of values in the image, e.g.,
 //__device__ image_err_func_byvalue dev_func_byvalue_ptr = sumOfAbsoluteDifferences<func_precision, grid_precision, grid_dimension, pixel_precision>;
 
 // grid_mi
-typedef func_byvalue_t<func_precision, grid_precision, grid_dimension, unsigned char*, unsigned char*, int, int, int, int> image_err_func_byvalue;
+typedef func_byvalue_t<func_precision, grid_precision, grid_dimension, unsigned char *, unsigned char *, int, int, int, int> image_err_func_byvalue;
 __device__ image_err_func_byvalue dev_func_byvalue_ptr = grid_mi<func_precision, grid_precision, grid_dimension, pixel_precision>;
 
 #define cudaCheckErrors(msg) \
@@ -76,7 +77,8 @@ __device__ image_err_func_byvalue dev_func_byvalue_ptr = grid_mi<func_precision,
 void cxxopts_integration(cxxopts::Options &options) {
 
     options.add_options()
-            ("i,input", "Input file", cxxopts::value<std::string>())
+            ("i_ref", "Reference Image (image in the reference coordinate frame)", cxxopts::value<std::string>())
+            ("i_mov", "Moved Image (image in the measured coordinate frame)", cxxopts::value<std::string>())
             //("f,format", "Data format {GOTCHA, Sandia, <auto>}", cxxopts::value<std::string>()->default_value("auto"))
             //("p,polarity", "Polarity {HH,HV,VH,VV,<any>}", cxxopts::value<std::string>()->default_value("any"))
             ("d,debug", "Enable debugging", cxxopts::value<bool>()->default_value("false"))
@@ -126,9 +128,23 @@ int main(int argc, char **argv) {
 
     auto result = options.parse(argc, argv);
 
+    std::string img_fixed_filename, img_moved_filename;
+    if (result.count("i_ref")) {
+        img_fixed_filename = result["i_ref"].as<std::string>();
+    } else {
+        std::cerr << "No input reference image was provided. Exiting.." << std::endl;
+        return EXIT_FAILURE;
+    }
+    if (result.count("i_mov")) {
+        img_moved_filename = result["i_mov"].as<std::string>();
+    } else {
+        std::cerr << "No input moving image was provided. Exiting.." << std::endl;
+        return EXIT_FAILURE;
+    }
+
     if (result.count("help")) {
         std::cout << options.help() << std::endl;
-        exit(0);
+        return EXIT_SUCCESS;
     }
 
     /* set GPU grid & block configuration */
@@ -140,7 +156,7 @@ int main(int argc, char **argv) {
     checkCudaErrors(cudaGetDevice(&cuda_device));
     checkCudaErrors(cudaGetDeviceProperties(&deviceProp, cuda_device));
 
-    // // Original
+    // Original
 
     // CudaImage<pixel_precision> m1(6, 6);
     // CudaImage<pixel_precision> m2(6, 6);
@@ -168,34 +184,37 @@ int main(int argc, char **argv) {
 
     int xf, yf, nf;
 
-    unsigned char * dataf = stbi_load(argv[1], &xf, &yf, &nf, 1);
-    if(dataf == NULL) {
-        printf("Image failed to load!\n");
-        return 1;
+    unsigned char *dataf = stbi_load(img_fixed_filename.c_str(), &xf, &yf, &nf, 1);
+    if (dataf == NULL) {
+        std::cerr << "Reference image " + img_fixed_filename + " failed to load!" << std::endl;
+        return EXIT_FAILURE;
     }
 
     int xm, ym, nm;
 
-    unsigned char * datam = stbi_load(argv[2], &xm, &ym, &nm, 1);
-    if(datam == NULL) {
-        printf("Image failed to load!\n");
-        return 1;
+    unsigned char *datam = stbi_load(img_moved_filename.c_str(), &xm, &ym, &nm, 1);
+    if (datam == NULL) {
+        std::cerr << "Moving image " + img_moved_filename + " failed to load!" << std::endl;
+        return EXIT_FAILURE;
     }
 
-    unsigned char* imagef;
-    checkCudaErrors(cudaMalloc(&imagef, xf*yf*sizeof(unsigned char)));
-    checkCudaErrors(cudaMemcpy(imagef, dataf, xf*yf*sizeof(unsigned char), cudaMemcpyHostToDevice));
+    unsigned char *imagef;
+    checkCudaErrors(cudaMalloc(&imagef, xf * yf * sizeof(unsigned char)));
+    checkCudaErrors(cudaMemcpy(imagef, dataf, xf * yf * sizeof(unsigned char), cudaMemcpyHostToDevice));
 
-    unsigned char* imagem;
-    checkCudaErrors(cudaMalloc(&imagem, xm*ym*sizeof(unsigned char)));
-    checkCudaErrors(cudaMemcpy(imagem, datam, xm*ym*sizeof(unsigned char), cudaMemcpyHostToDevice));
+    unsigned char *imagem;
+    checkCudaErrors(cudaMalloc(&imagem, xm * ym * sizeof(unsigned char)));
+    checkCudaErrors(cudaMemcpy(imagem, datam, xm * ym * sizeof(unsigned char), cudaMemcpyHostToDevice));
 
-    checkCudaErrors(cudaDeviceSetLimit(cudaLimitMallocHeapSize,1<<30));
+    checkCudaErrors(cudaDeviceSetLimit(cudaLimitMallocHeapSize, 1 << 30));
 
     // Example MI
-    std::vector<grid_precision> start_point = {(grid_precision) -xm/2, (grid_precision) -ym/2, (grid_precision) 0, (grid_precision) 1};
-    std::vector<grid_precision> end_point =   {(grid_precision) xf-xm/2, (grid_precision) yf-ym/2, (grid_precision) 0, (grid_precision) 1};
-    std::vector<grid_precision> num_samples =  {(grid_precision) (xf+1), (grid_precision) (yf+1), (grid_precision) 1, (grid_precision) 1};
+    std::vector<grid_precision> start_point = {(grid_precision) -xm / 2, (grid_precision) -ym / 2, (grid_precision) 0,
+                                               (grid_precision) 1};
+    std::vector<grid_precision> end_point = {(grid_precision) xf - xm / 2, (grid_precision) yf - ym / 2,
+                                             (grid_precision) 0, (grid_precision) 1};
+    std::vector<grid_precision> num_samples = {(grid_precision) (xf + 1), (grid_precision) (yf + 1), (grid_precision) 1,
+                                               (grid_precision) 1};
 
     CudaGrid<grid_precision, grid_dimension> translation_xy_grid;
     ck(cudaMalloc(&translation_xy_grid.data(), translation_xy_grid.bytesSize()));
@@ -223,7 +242,7 @@ int main(int argc, char **argv) {
 
     //translation_xy_gridsearcher.search(host_func_byval_ptr, m1, m2);
     // translation_xy_gridsearcher.search_by_value(host_func_byval_ptr, m1, m2);
-    translation_xy_gridsearcher.search_by_value_stream(host_func_byval_ptr, 10000, imagem, imagef, xm, ym, xf, yf);
+    translation_xy_gridsearcher.search_by_value_stream(host_func_byval_ptr, 10000, 1, imagem, imagef, xm, ym, xf, yf);
 
 //    func_values.display();
 
@@ -234,8 +253,8 @@ int main(int argc, char **argv) {
     grid_precision min_grid_point[grid_dimension];
     translation_xy_grid.getGridPoint(min_grid_point, min_value_index1d);
     std::cout << "Minimum found at point p = { ";
-    for (int d=0; d < grid_dimension; d++) {
-        std::cout << min_grid_point[d] << ((d < grid_dimension -1) ? ", " : " ");
+    for (int d = 0; d < grid_dimension; d++) {
+        std::cout << min_grid_point[d] << ((d < grid_dimension - 1) ? ", " : " ");
     }
     std::cout << "}" << std::endl;
 

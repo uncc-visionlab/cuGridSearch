@@ -481,6 +481,7 @@ struct CudaMatrix : public CudaTensor<precision, 2> {
     }
 
     CudaMatrix &operator=(CudaMatrix &m) {
+        // invoke superclass operator=() from CudaTensor<>
         static_cast<CudaTensor<precision, 2> &>(*this) = m;
         // ... copy member variables of CudaMatrix
         return *this;
@@ -498,6 +499,7 @@ struct CudaImage : public CudaMatrix<precision> {
     }
 
     CudaImage &operator=(CudaImage &m) {
+        // invoke superclass operator=() from CudaTensor<>
         static_cast<CudaTensor<precision, 2> &>(*this) = m;
         // ... copy member variables of CudaImage
         return *this;
@@ -546,6 +548,7 @@ struct CudaVector : public CudaMatrix<precision> {
     CUDAFUNCTION ~CudaVector() {
     }
 
+    // invoke superclass operator=() from CudaTensor<>
     CudaVector &operator=(CudaVector &m) {
         static_cast<CudaTensor<precision, 2> &>(*this) = m;
         // ... copy member variables of CudaVector

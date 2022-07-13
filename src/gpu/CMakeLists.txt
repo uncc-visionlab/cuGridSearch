@@ -8,7 +8,9 @@ set( CMAKE_BUILD_TYPE Debug)
 find_package(CUDA)
 
 #set(CUDA_NVCC_FLAGS -Xcompiler -fPIC -use_fast_math -gencode=arch=compute_20,code="sm_20,compute_20" --ptxas-options=-v -DMATLAB_MEX_FILE -G -g -O0)
-set(CUDA_NVCC_FLAGS -Xcompiler -no-pie --ptxas-options=-v -DMATLAB_MEX_FILE -G -g -O0)
+#set(CUDA_NVCC_FLAGS -Xcompiler -no-pie --ptxas-options=-v -DMATLAB_MEX_FILE -G -g -O0)
+# suppress multiple "set but never used" variable warnings due to using NVCC to compile code using stb_image.h
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS}  --diag-suppress 550")
 
 include_directories(
     ../../../include
