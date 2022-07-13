@@ -39,10 +39,12 @@
 
 #include "cudaGridSearch.cuh"
 #include "cudaErrorFunctions.cuh"
+#include "cudaErrorFunction_mi.cuh"
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_FAILURE_USERMSG
 #define STBI_NO_FAILURE_STRINGS
+
 #include "stb_image.h"
 
 #define PI 3.14159265
@@ -59,8 +61,10 @@ typedef unsigned char pixel_precision; // the type of values in the image, e.g.,
 //__device__ image_err_func_byvalue dev_func_byvalue_ptr = sumOfAbsoluteDifferences<func_precision, grid_precision, grid_dimension, pixel_precision>;
 
 // grid_mi
-typedef func_byvalue_t<func_precision, grid_precision, grid_dimension, unsigned char *, unsigned char *, int, int, int, int> image_err_func_byvalue;
-__device__ image_err_func_byvalue dev_func_byvalue_ptr = grid_mi<func_precision, grid_precision, grid_dimension, pixel_precision>;
+typedef func_byvalue_t<func_precision, grid_precision, grid_dimension,
+        unsigned char *, unsigned char *, int, int, int, int> image_err_func_byvalue;
+__device__ image_err_func_byvalue dev_func_byvalue_ptr = grid_mi<func_precision, grid_precision,
+        grid_dimension, pixel_precision>;
 
 #define cudaCheckErrors(msg) \
     do { \

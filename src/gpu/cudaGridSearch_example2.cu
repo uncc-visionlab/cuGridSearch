@@ -27,15 +27,18 @@
 #include "cudaErrorFunctions.cuh"
 
 #define grid_dimension 2        // the dimension of the grid, e.g., 1 => 1D grid, 2 => 2D grid, 3=> 3D grid, etc.
+#define CHANNELS 1              // the number of channels in the image data
 typedef float grid_precision;   // the type of values in the grid, e.g., float, double, int, etc.
 typedef float func_precision;   // the type of values taken by the error function, e.g., float, double, int, etc.
 typedef double pixel_precision; // the type of values in the image, e.g., float, double, int, etc.
 
-typedef func_byreference_t<func_precision, grid_precision, grid_dimension, CudaImage<pixel_precision>, CudaImage<pixel_precision> > image_err_func_byref;
+typedef func_byreference_t<func_precision, grid_precision, grid_dimension,
+        CudaImage<pixel_precision, CHANNELS>, CudaImage<pixel_precision, CHANNELS> > image_err_func_byref;
 
 // create device function pointer for by-reference kernel function here
 //__device__ image_err_func_byref dev_func_byref_ptr = averageAbsoluteDifference<func_precision, grid_precision, grid_dimension, pixel_precision>;
-__device__ image_err_func_byref dev_func_byref_ptr = sumOfAbsoluteDifferences<func_precision, grid_precision, grid_dimension, pixel_precision>;
+__device__ image_err_func_byref dev_func_byref_ptr = sumOfAbsoluteDifferences<func_precision, grid_precision,
+        grid_dimension, CHANNELS, pixel_precision>;
 
 // test grid search
 // classes typically store images in column major format so the images
@@ -106,7 +109,8 @@ int main(int argc, char **argv) {
 
     // first template argument is the error function return type
     // second template argument is the grid point value type
-    CudaGridSearcher<func_precision, grid_precision, grid_dimension> translation_xy_gridsearcher(translation_xy_grid, func_values);
+    CudaGridSearcher<func_precision, grid_precision, grid_dimension> translation_xy_gridsearcher(translation_xy_grid,
+                                                                                                 func_values);
 
     CudaImage<pixel_precision> *d_m1, *d_m2;
     ck(cudaMalloc((void **) &d_m1, sizeof(CudaImage<pixel_precision>)));
@@ -119,7 +123,7 @@ int main(int argc, char **argv) {
                          sizeof(image_err_func_byref));
 
     // translation_xy_gridsearcher.search_by_reference(host_func_byref_ptr, d_m1, d_m2);
-    translation_xy_gridsearcher.search_by_reference_stream(host_func_byref_ptr, 10000, d_m1, d_m2);
+    translation_xy_gridsearcher.search_by_reference_stream(host_func_byref_ptr, 10000, 1, d_m1, d_m2);
 
 //    func_values.display();
 
@@ -130,8 +134,8 @@ int main(int argc, char **argv) {
     grid_precision min_grid_point[grid_dimension];
     translation_xy_grid.getGridPoint(min_grid_point, min_value_index1d);
     std::cout << "Minimum found at point p = { ";
-    for (int d=0; d < grid_dimension; d++) {
-        std::cout << min_grid_point[d] << ((d < grid_dimension -1) ? ", " : " ");
+    for (int d = 0; d < grid_dimension; d++) {
+        std::cout << min_grid_point[d] << ((d < grid_dimension - 1) ? ", " : " ");
     }
     std::cout << "}" << std::endl;
 

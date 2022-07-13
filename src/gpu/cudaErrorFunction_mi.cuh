@@ -142,7 +142,7 @@ template<typename func_precision, typename grid_precision, unsigned int D = 8, t
 CUDAFUNCTION func_precision
 grid_mi(nv_ext::Vec<grid_precision, D> &H,
         unsigned char *img_moved, unsigned char *img_fixed, int colsm, int rowsm, int colsf, int rowsf) {
-
+//    int pixelIndex = blockDim.x * blockIdx.x + threadIdx.x;
     // Create blank temp image for after perspective transform
     unsigned char *tempImage = new unsigned char[colsf * rowsf];
     if (tempImage == NULL) {

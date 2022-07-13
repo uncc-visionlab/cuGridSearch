@@ -28,14 +28,17 @@
 #include "cudaErrorFunctions.cuh"
 
 #define grid_dimension 2        // the dimension of the grid, e.g., 1 => 1D grid, 2 => 2D grid, 3=> 3D grid, etc.
+#define CHANNELS 1              // the number of channels in the image data
 typedef float grid_precision;   // the type of values in the grid, e.g., float, double, int, etc.
 typedef float func_precision;   // the type of values taken by the error function, e.g., float, double, int, etc.
 typedef double pixel_precision; // the type of values in the image, e.g., float, double, int, etc.
 
-typedef func_byvalue_t<func_precision, grid_precision, grid_dimension, CudaImage<pixel_precision>, CudaImage<pixel_precision> > image_err_func_byvalue;
+typedef func_byvalue_t<func_precision, grid_precision, grid_dimension,
+        CudaImage<pixel_precision, CHANNELS>, CudaImage<pixel_precision, CHANNELS> > image_err_func_byvalue;
 
 // create device function pointer for by-value kernel function here
-__device__ image_err_func_byvalue dev_func_byvalue_ptr = averageAbsoluteDifference<func_precision, grid_precision, grid_dimension, pixel_precision>;
+__device__ image_err_func_byvalue dev_func_byvalue_ptr = averageAbsoluteDifference<func_precision, grid_precision,
+        grid_dimension, CHANNELS, pixel_precision>;
 //__device__ image_err_func_byvalue dev_func_byvalue_ptr = sumOfAbsoluteDifferences<func_precision, grid_precision, grid_dimension, pixel_precision>;
 
 // test grid search
@@ -89,10 +92,10 @@ int main(int argc, char **argv) {
 
     std::vector<grid_precision> start_point = {(grid_precision) -m2.width() / 2, (grid_precision) -m2.height() / 2};
     std::vector<grid_precision> end_point = {(grid_precision) std::abs(m1.width() - (m2.width() / 2)),
-                                  (grid_precision) std::abs(m1.height() - (m2.height() / 2))};
+                                             (grid_precision) std::abs(m1.height() - (m2.height() / 2))};
     std::vector<grid_precision> num_samples = {(grid_precision) 103, (grid_precision) 111};
 
-    CudaGrid<grid_precision,grid_dimension> translation_xy_grid;
+    CudaGrid<grid_precision, grid_dimension> translation_xy_grid;
     ck(cudaMalloc(&translation_xy_grid.data(), translation_xy_grid.bytesSize()));
 
     translation_xy_grid.setStartPoint(start_point);
@@ -109,7 +112,8 @@ int main(int argc, char **argv) {
 
     // first template argument is the error function return type
     // second template argument is the grid point value type
-    CudaGridSearcher<func_precision, grid_precision, grid_dimension> translation_xy_gridsearcher(translation_xy_grid, func_values);
+    CudaGridSearcher<func_precision, grid_precision, grid_dimension> translation_xy_gridsearcher(translation_xy_grid,
+                                                                                                 func_values);
 
     // Copy device function pointer for the function having by-value parameters to host side
     cudaMemcpyFromSymbol(&host_func_byval_ptr, dev_func_byvalue_ptr,
@@ -117,7 +121,7 @@ int main(int argc, char **argv) {
 
     //translation_xy_gridsearcher.search(host_func_byval_ptr, m1, m2);
     // translation_xy_gridsearcher.search_by_value(host_func_byval_ptr, m1, m2);
-    translation_xy_gridsearcher.search_by_value_stream(host_func_byval_ptr, 10000, m1, m2);
+    translation_xy_gridsearcher.search_by_value_stream(host_func_byval_ptr, 10000, 1, m1, m2);
 
 //    func_values.display("grid values",num_samples[0]);
 //    func_values.display("grid values");
@@ -129,8 +133,8 @@ int main(int argc, char **argv) {
     grid_precision min_grid_point[grid_dimension];
     translation_xy_grid.getGridPoint(min_grid_point, min_value_index1d);
     std::cout << "Minimum found at point p = { ";
-    for (int d=0; d < grid_dimension; d++) {
-        std::cout << min_grid_point[d] << ((d < grid_dimension -1) ? ", " : " ");
+    for (int d = 0; d < grid_dimension; d++) {
+        std::cout << min_grid_point[d] << ((d < grid_dimension - 1) ? ", " : " ");
     }
     std::cout << "}" << std::endl;
 

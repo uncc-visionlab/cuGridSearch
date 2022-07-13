@@ -352,11 +352,11 @@ struct CudaMatrix : public CudaTensor<precision, 2> {
     }
 
     CUDAFUNCTION int32_t width() const {
-        return this->size(0);//(int32_t) this->_dims[0];
+        return this->size(0);
     }
 
     CUDAFUNCTION int32_t height() const {
-        return this->size(1);//(int32_t) this->_dims[1];
+        return this->size(1);
     }
 
     template<typename T>
@@ -488,37 +488,57 @@ struct CudaMatrix : public CudaTensor<precision, 2> {
     }
 };
 
-template<typename precision>
-struct CudaImage : public CudaMatrix<precision> {
+template<typename precision, uint32_t CHANNELS = 1>
+struct CudaImage : public CudaTensor<precision, 3> {
 //#define OUTSIDE_IMAGE_VALUE cuda::std::numeric_limits<float>::infinity()
 #define OUTSIDE_IMAGE_VALUE 0
-    CUDAFUNCTION CudaImage(uint32_t _height, uint32_t _width) : CudaMatrix<precision>(_height, _width) {
+
+    CUDAFUNCTION CudaImage(uint32_t _height, uint32_t _width) :
+            CudaTensor<precision, 3>({_width, _height, CHANNELS}) {
     }
 
     CUDAFUNCTION ~CudaImage() {
     }
 
+    CUDAFUNCTION int32_t width() const {
+        return this->size(0);
+    }
+
+    CUDAFUNCTION int32_t height() const {
+        return this->size(1);
+    }
+
+    template<typename T>
+    CUDAFUNCTION int toIndex(T y, T x, T c = 0) const {
+        return CudaTensor<precision, 3>::toIndex1d({x, y, c});
+    }
+
+    template<typename T>
+    CUDAFUNCTION precision &at(T row_index, T column_index, T channel_index = 0) const {
+        return this->_data[toIndex(row_index, column_index, channel_index)];
+    }
+
     CudaImage &operator=(CudaImage &m) {
         // invoke superclass operator=() from CudaTensor<>
-        static_cast<CudaTensor<precision, 2> &>(*this) = m;
+        static_cast<CudaTensor<precision, 3> &>(*this) = m;
         // ... copy member variables of CudaImage
         return *this;
     }
 
-    CUDAFUNCTION bool inImage(float y, float x) const {
+    CUDAFUNCTION bool inImage(float y, float x, float c = 0) const {
         return (x >= 0 && y >= 0 && x < this->width() && y < this->height());
     }
 
-    CUDAFUNCTION float valueAt(float y, float x) const {
+    CUDAFUNCTION float valueAt(float y, float x, float c = 0) const {
         //return valueAt_nearest_neighbor(x, y);
-        return valueAt_bilinear(y, x);
+        return valueAt_bilinear(y, x, c);
     }
 
-    CUDAFUNCTION precision valueAt_nearest_neighbor(float y, float x) const {
+    CUDAFUNCTION precision valueAt_nearest_neighbor(float y, float x, float c = 0) const {
         return (precision) ((this->inImage(y, x)) ? this->_data[this->toIndex(y, x)] : OUTSIDE_IMAGE_VALUE);
     }
 
-    CUDAFUNCTION float valueAt_bilinear(float y, float x) const {
+    CUDAFUNCTION float valueAt_bilinear(float y, float x, float c = 0) const {
         if (this->inImage(y, x)) {
             float tlc = this->_data[this->toIndex(floor(y), floor(x))];
             float trc = this->_data[this->toIndex(floor(y), ceil(x))];

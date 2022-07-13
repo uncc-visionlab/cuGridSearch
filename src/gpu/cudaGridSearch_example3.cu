@@ -27,16 +27,19 @@
 #include "cudaErrorFunctions.cuh"
 
 #define grid_dimension 8        // the dimension of the grid, e.g., 1 => 1D grid, 2 => 2D grid, 3=> 3D grid, etc.
+#define CHANNELS 1              // the number of channels in the image data
 typedef float grid_precision;   // the type of values in the grid, e.g., float, double, int, etc.
 typedef float func_precision;   // the type of values taken by the error function, e.g., float, double, int, etc.
 typedef double pixel_precision; // the type of values in the image, e.g., float, double, int, etc.
 
-typedef func_byvalue_t<func_precision, grid_precision, grid_dimension, CudaImage<pixel_precision>, CudaImage<pixel_precision> > image_err_func_byvalue;
+typedef func_byvalue_t<func_precision, grid_precision, grid_dimension,
+        CudaImage<pixel_precision, CHANNELS>, CudaImage<pixel_precision, CHANNELS> > image_err_func_byvalue;
 
 // create device function pointer for by-value kernel function here
 //__device__ image_err_func_byvalue dev_func_byvalue_ptr = averageAbsoluteDifference<func_precision, grid_precision, grid_dimension, pixel_precision>;
 //__device__ image_err_func_byvalue dev_func_byvalue_ptr = sumOfAbsoluteDifferences<func_precision, grid_precision, grid_dimension, pixel_precision>;
-__device__ image_err_func_byvalue dev_func_byvalue_ptr = averageAbsoluteDifferenceH<func_precision, grid_precision, grid_dimension, pixel_precision>;
+__device__ image_err_func_byvalue dev_func_byvalue_ptr = averageAbsoluteDifferenceH<func_precision, grid_precision,
+        grid_dimension, CHANNELS, pixel_precision>;
 
 // test grid search
 // classes typically store images in column major format so the images
@@ -126,7 +129,7 @@ int main(int argc, char **argv) {
                          sizeof(image_err_func_byvalue));
 
     //perspective_transform_gridsearcher.search(host_func_byval_ptr, m1, m2);
-    perspective_transform_gridsearcher.search_by_value_stream(host_func_byval_ptr, 10000, m1, m2);
+    perspective_transform_gridsearcher.search_by_value_stream(host_func_byval_ptr, 10000, 1, m1, m2);
 
 //    func_values.display();
 
