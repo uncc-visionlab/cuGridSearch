@@ -306,7 +306,8 @@ __global__ void evaluationKernel_by_value(CudaGrid<grid_precision, D> grid,
     }
 //    printf("gridpt(%d,%d)\n", (int) grid_point[0], (int) grid_point[1]);
 //    gridpt[0] = gridpt[1] = 0;
-    *(result + threadIndex) = (*op)(gridpt, arg_vals...);
+    *(result + threadIndex) = 0;
+    *(result + threadIndex) += (*op)(gridpt, arg_vals...);
 //    printf("func_byvalue_t %p setting gridvalue[%d] = %f\n", *op, threadIndex, *(result + threadIndex));
 //    delete[] grid_point;
 }
@@ -334,7 +335,8 @@ __global__ void evaluationKernel_by_value_stream(CudaGrid<grid_precision, D> gri
     for (int d = 0; d < D; d++) {
         gridpt[d] = grid_point[d];
     }
-    *(result + streamIndex) = (*op)(gridpt, arg_vals...);
+    *(result + streamIndex) = 0;
+    *(result + streamIndex) += (*op)(gridpt, arg_vals...);
 }
 
 template<typename func_precision, typename grid_precision, unsigned int D, typename ... Types>
@@ -360,7 +362,8 @@ __global__ void evaluationKernel_by_reference(CudaGrid<grid_precision, D> grid,
     }
 //    printf("gridpt(%d,%d)\n", (int) grid_point[0], (int) grid_point[1]);
 //    gridpt[0] = gridpt[1] = 0;
-    *(result + threadIndex) = (*op)(gridpt, arg_ptrs...);
+    *(result + threadIndex) = 0;
+    *(result + threadIndex) += (*op)(gridpt, arg_ptrs...);
 //    printf("func_byreference_t %p setting gridvalue[%d] = %f\n", *op, threadIndex, *(result + threadIndex));
     delete[] grid_point;
 }
@@ -387,7 +390,8 @@ __global__ void evaluationKernel_by_reference_stream(CudaGrid<grid_precision, D>
     for (int d = 0; d < D; d++) {
         gridpt[d] = grid_point[d];
     }
-    *(result + streamIndex) = (*op)(gridpt, arg_ptrs...);
+    *(result + streamIndex) = 0;
+    *(result + streamIndex) += (*op)(gridpt, arg_ptrs...);
     delete[] grid_point;
 }
 
@@ -474,8 +478,7 @@ struct CudaGridSearcher {
                 evaluationKernel_by_value_stream<<< numBlocks, numThreads, 0, streams[j]>>>(*_grid, (*_result).data(),
                                                                                   STREAM_BLOCK_DIM,
                                                                                   i, j, total_samples, errorFunction,
-                                                                                  pt,
-                                                                                  arg_vals...);
+                                                                                  pt, arg_vals...);
                 checkCudaErrors(cudaEventRecord(kernelEvent[j], streams[j]));
 
                 // make the last stream wait for the kernel event to be recorded

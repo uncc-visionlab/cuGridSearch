@@ -508,6 +508,10 @@ struct CudaImage : public CudaTensor<precision, 3> {
         return this->size(1);
     }
 
+    CUDAFUNCTION int32_t channels() const {
+        return this->size(2);
+    }
+
     template<typename T>
     CUDAFUNCTION int toIndex(T y, T x, T c = 0) const {
         return CudaTensor<precision, 3>::toIndex1d({x, y, c});
@@ -525,7 +529,7 @@ struct CudaImage : public CudaTensor<precision, 3> {
         return *this;
     }
 
-    CUDAFUNCTION bool inImage(float y, float x, float c = 0) const {
+    CUDAFUNCTION bool inImage(float y, float x) const {
         return (x >= 0 && y >= 0 && x < this->width() && y < this->height());
     }
 
@@ -535,15 +539,15 @@ struct CudaImage : public CudaTensor<precision, 3> {
     }
 
     CUDAFUNCTION precision valueAt_nearest_neighbor(float y, float x, float c = 0) const {
-        return (precision) ((this->inImage(y, x)) ? this->_data[this->toIndex(y, x)] : OUTSIDE_IMAGE_VALUE);
+        return (precision) ((this->inImage(y, x)) ? this->_data[this->toIndex(y, x, c)] : OUTSIDE_IMAGE_VALUE);
     }
 
     CUDAFUNCTION float valueAt_bilinear(float y, float x, float c = 0) const {
         if (this->inImage(y, x)) {
-            float tlc = this->_data[this->toIndex(floor(y), floor(x))];
-            float trc = this->_data[this->toIndex(floor(y), ceil(x))];
-            float blc = this->_data[this->toIndex(ceil(y), floor(x))];
-            float brc = this->_data[this->toIndex(ceil(y), ceil(x))];
+            float tlc = this->_data[this->toIndex(floor(y), floor(x), c)];
+            float trc = this->_data[this->toIndex(floor(y), ceil(x), c)];
+            float blc = this->_data[this->toIndex(ceil(y), floor(x), c)];
+            float brc = this->_data[this->toIndex(ceil(y), ceil(x), c)];
             float alpha_x = x - floor(x);
             float alpha_y = y - floor(y);
             float value_top = (1.0f - alpha_x) * tlc + alpha_x * trc;

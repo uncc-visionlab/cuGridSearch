@@ -26,6 +26,7 @@
 
 #include "cudaGridSearch.cuh"
 #include "cudaErrorFunctions.cuh"
+#include "cudaErrorFunctionsStreams.cuh"
 
 #define grid_dimension 2        // the dimension of the grid, e.g., 1 => 1D grid, 2 => 2D grid, 3=> 3D grid, etc.
 #define CHANNELS 1              // the number of channels in the image data
@@ -37,9 +38,12 @@ typedef func_byvalue_t<func_precision, grid_precision, grid_dimension,
         CudaImage<pixel_precision, CHANNELS>, CudaImage<pixel_precision, CHANNELS> > image_err_func_byvalue;
 
 // create device function pointer for by-value kernel function here
-__device__ image_err_func_byvalue dev_func_byvalue_ptr = averageAbsoluteDifference<func_precision, grid_precision,
+//__device__ image_err_func_byvalue dev_func_byvalue_ptr = averageAbsoluteDifference<func_precision, grid_precision,
+//        grid_dimension, CHANNELS, pixel_precision>;
+__device__ image_err_func_byvalue dev_func_byvalue_ptr = averageAbsoluteDifference_stream<func_precision, grid_precision,
         grid_dimension, CHANNELS, pixel_precision>;
-//__device__ image_err_func_byvalue dev_func_byvalue_ptr = sumOfAbsoluteDifferences<func_precision, grid_precision, grid_dimension, pixel_precision>;
+//__device__ image_err_func_byvalue dev_func_byvalue_ptr = sumOfAbsoluteDifferences<func_precision, grid_precision,
+//        grid_dimension, CHANNELS, pixel_precision>;
 
 // test grid search
 // classes typically store images in column major format so the images
@@ -93,7 +97,7 @@ int main(int argc, char **argv) {
     std::vector<grid_precision> start_point = {(grid_precision) -m2.width() / 2, (grid_precision) -m2.height() / 2};
     std::vector<grid_precision> end_point = {(grid_precision) std::abs(m1.width() - (m2.width() / 2)),
                                              (grid_precision) std::abs(m1.height() - (m2.height() / 2))};
-    std::vector<grid_precision> num_samples = {(grid_precision) 103, (grid_precision) 111};
+    std::vector<grid_precision> num_samples = {(grid_precision) 1000, (grid_precision) 1000};
 
     CudaGrid<grid_precision, grid_dimension> translation_xy_grid;
     ck(cudaMalloc(&translation_xy_grid.data(), translation_xy_grid.bytesSize()));
@@ -120,8 +124,8 @@ int main(int argc, char **argv) {
                          sizeof(image_err_func_byvalue));
 
     //translation_xy_gridsearcher.search(host_func_byval_ptr, m1, m2);
-    // translation_xy_gridsearcher.search_by_value(host_func_byval_ptr, m1, m2);
-    translation_xy_gridsearcher.search_by_value_stream(host_func_byval_ptr, 10000, 1, m1, m2);
+//    translation_xy_gridsearcher.search_by_value(host_func_byval_ptr, m1, m2);
+    translation_xy_gridsearcher.search_by_value_stream(host_func_byval_ptr, 5000, 10, m1, m2);
 
 //    func_values.display("grid values",num_samples[0]);
 //    func_values.display("grid values");
