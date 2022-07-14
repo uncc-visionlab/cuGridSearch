@@ -77,8 +77,8 @@ int main(int argc, char **argv) {
     CudaImage<pixel_precision> m1(6, 6);
     CudaImage<pixel_precision> m2(6, 6);
 
-    ck(cudaMalloc(&m1.data(), m1.bytesSize()));
-    ck(cudaMalloc(&m2.data(), m2.bytesSize()));
+    checkCudaErrors(cudaMalloc(&m1.data(), m1.bytesSize()));
+    checkCudaErrors(cudaMalloc(&m2.data(), m2.bytesSize()));
 
     m1.setValuesFromVector(std::vector<pixel_precision>(imageA_data, imageA_data + 6 * 6));
     m2.setValuesFromVector(std::vector<pixel_precision>(imageC_data, imageC_data + 6 * 6));
@@ -92,7 +92,7 @@ int main(int argc, char **argv) {
     std::vector<grid_precision> num_samples = {(grid_precision) 103, (grid_precision) 111};
 
     CudaGrid<grid_precision, grid_dimension> translation_xy_grid;
-    ck(cudaMalloc(&translation_xy_grid.data(), translation_xy_grid.bytesSize()));
+    checkCudaErrors(cudaMalloc(&translation_xy_grid.data(), translation_xy_grid.bytesSize()));
 
     translation_xy_grid.setStartPoint(start_point);
     translation_xy_grid.setEndPoint(end_point);
@@ -104,7 +104,7 @@ int main(int argc, char **argv) {
     translation_xy_grid.getAxisSampleCounts(axis_sample_counts);
 
     CudaTensor<func_precision, grid_dimension> func_values(axis_sample_counts);
-    ck(cudaMalloc(&func_values._data, func_values.bytesSize()));
+    checkCudaErrors(cudaMalloc(&func_values._data, func_values.bytesSize()));
     func_values.fill(0);
 
     // first template argument is the error function return type
@@ -113,8 +113,8 @@ int main(int argc, char **argv) {
                                                                                                  func_values);
 
     CudaImage<pixel_precision> *d_m1, *d_m2;
-    ck(cudaMalloc((void **) &d_m1, sizeof(CudaImage<pixel_precision>)));
-    ck(cudaMalloc((void **) &d_m2, sizeof(CudaImage<pixel_precision>)));
+    checkCudaErrors(cudaMalloc((void **) &d_m1, sizeof(CudaImage<pixel_precision>)));
+    checkCudaErrors(cudaMalloc((void **) &d_m2, sizeof(CudaImage<pixel_precision>)));
     cudaMemcpy(d_m1, &m1, sizeof(CudaImage<pixel_precision>), cudaMemcpyHostToDevice);
     cudaMemcpy(d_m2, &m2, sizeof(CudaImage<pixel_precision>), cudaMemcpyHostToDevice);
 
@@ -139,14 +139,14 @@ int main(int argc, char **argv) {
     }
     std::cout << "}" << std::endl;
 
-    ck(cudaFree(d_m1));
-    ck(cudaFree(d_m2));
+    checkCudaErrors(cudaFree(d_m1));
+    checkCudaErrors(cudaFree(d_m2));
 
     // Clean memory
-    ck(cudaFree(m1.data()));
-    ck(cudaFree(m2.data()));
-    ck(cudaFree(translation_xy_grid.data()));
-    ck(cudaFree(func_values.data()));
+    checkCudaErrors(cudaFree(m1.data()));
+    checkCudaErrors(cudaFree(m2.data()));
+    checkCudaErrors(cudaFree(translation_xy_grid.data()));
+    checkCudaErrors(cudaFree(func_values.data()));
 
     return EXIT_SUCCESS;
 }

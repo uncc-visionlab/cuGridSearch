@@ -62,13 +62,13 @@ averageAbsoluteDifference_stream(nv_ext::Vec<grid_precision, D> &t, CudaImage<pi
         }
     }
 
-    //synchronize the local threads writing to the local memory cache
+    // let all local threads in the block that are writing to the local memory cache finish the code above
     __syncthreads();
 
     float sum_of_absolute_differences_block = 0;
     int num_errors_block = 0;
-    // have the first thread perform the global block error sum
-    if (y == 0) {
+    // have the first thread in the block perform the global block error sum
+    if (threadIdx.x == 0) {
         for (int row = 0; row < img_fixed.height(); row++) {
             sum_of_absolute_differences_block += sum_of_absolute_differences[row];
             num_errors_block += num_errors[row];
