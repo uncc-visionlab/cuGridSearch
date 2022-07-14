@@ -494,27 +494,27 @@ struct CudaImage : public CudaTensor<precision, 3> {
 #define OUTSIDE_IMAGE_VALUE 0
 
     CUDAFUNCTION CudaImage(uint32_t _height, uint32_t _width) :
-            CudaTensor<precision, 3>({_width, _height, CHANNELS}) {
+            CudaTensor<precision, 3>({CHANNELS, _width, _height}) {
     }
 
     CUDAFUNCTION ~CudaImage() {
     }
 
-    CUDAFUNCTION int32_t width() const {
+    CUDAFUNCTION int32_t channels() const {
         return this->size(0);
     }
 
-    CUDAFUNCTION int32_t height() const {
+    CUDAFUNCTION int32_t width() const {
         return this->size(1);
     }
 
-    CUDAFUNCTION int32_t channels() const {
+    CUDAFUNCTION int32_t height() const {
         return this->size(2);
     }
 
     template<typename T>
     CUDAFUNCTION int toIndex(T y, T x, T c = 0) const {
-        return CudaTensor<precision, 3>::toIndex1d({x, y, c});
+        return CudaTensor<precision, 3>::toIndex1d({c, x, y});
     }
 
     template<typename T>

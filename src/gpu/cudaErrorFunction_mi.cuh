@@ -138,19 +138,22 @@ CUDAFUNCTION float calcMI(unsigned char *image1, unsigned char *image2, int cols
 }
 
 // TODO: Go simpler than starting with H 
-template<typename func_precision, typename grid_precision, unsigned int D = 8, typename pixType>
-CUDAFUNCTION func_precision
-grid_mi(nv_ext::Vec<grid_precision, D> &H,
-        unsigned char *img_moved, unsigned char *img_fixed, int colsm, int rowsm, int colsf, int rowsf) {
+template<typename func_precision, typename grid_precision, uint8_t D = 8, uint8_t CHANNELS, typename pixType>
+CUDAFUNCTION func_precision grid_mi(nv_ext::Vec<grid_precision, D> &H,
+                                    CudaImage<pixType, CHANNELS> img_moved, CudaImage<pixType, CHANNELS> img_fixed) {
 //    int pixelIndex = blockDim.x * blockIdx.x + threadIdx.x;
     // Create blank temp image for after perspective transform
-    unsigned char *tempImage = new unsigned char[colsf * rowsf];
+    int colsf = img_fixed.width();
+    int rowsf = img_fixed.height();
+    int colsm = img_moved.width();
+    int rowsm = img_moved.height();
+    unsigned char *tempImage = new unsigned char[img_fixed.size()];
     if (tempImage == NULL) {
         delete[] tempImage;
         printf("Out of heap memory!\n");
         return 1;
     }
-    for (int i = 0; i < colsf * rowsf; i++) {
+    for (int i = 0; i < img_fixed.size(); i++) {
         tempImage[i] = 0;
     }
 
@@ -176,7 +179,7 @@ grid_mi(nv_ext::Vec<grid_precision, D> &H,
     }
 
     // Calculate MI
-    output = calcMI(img_fixed, tempImage, colsf, rowsf, 256);
+    output = calcMI(img_fixed.data(), tempImage, colsf, rowsf, 256);
     //output = calcNCC(img_fixed, tempImage, cols, rows);
     //output = -1*calcSQD(img_fixed, tempImage, cols, rows);
 

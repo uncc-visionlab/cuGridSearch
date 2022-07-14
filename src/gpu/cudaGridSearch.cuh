@@ -476,9 +476,10 @@ struct CudaGridSearcher {
                    numStreamBlocks);
             for (int j = 0; j < numStreams; ++j) {
                 evaluationKernel_by_value_stream<<< numBlocks, numThreads, 0, streams[j]>>>(*_grid, (*_result).data(),
-                                                                                  STREAM_BLOCK_DIM,
-                                                                                  i, j, total_samples, errorFunction,
-                                                                                  pt, arg_vals...);
+                                                                                            STREAM_BLOCK_DIM, i, j,
+                                                                                            total_samples,
+                                                                                            errorFunction,
+                                                                                            pt, arg_vals...);
                 checkCudaErrors(cudaEventRecord(kernelEvent[j], streams[j]));
 
                 // make the last stream wait for the kernel event to be recorded
@@ -555,11 +556,12 @@ struct CudaGridSearcher {
             printf("Progress %.2f%% (%d/%d search blocks)\r", (float) (i + 1) * 100 / numStreamBlocks, i + 1,
                    numStreamBlocks);
             for (int j = 0; j < numStreams; ++j) {
-                evaluationKernel_by_reference_stream<<< numBlocks, numThreads, 0, streams[j]>>>(*_grid, (*_result).data(),
-                                                                                      STREAM_BLOCK_DIM, i, j,
-                                                                                      total_samples,
-                                                                                      errorFunction,
-                                                                                      pt, arg_ptrs...);
+                evaluationKernel_by_reference_stream<<< numBlocks, numThreads, 0, streams[j]>>>(*_grid,
+                                                                                                (*_result).data(),
+                                                                                                STREAM_BLOCK_DIM, i, j,
+                                                                                                total_samples,
+                                                                                                errorFunction,
+                                                                                                pt, arg_ptrs...);
                 checkCudaErrors(cudaEventRecord(kernelEvent[j], streams[j]));
 
                 // make the last stream wait for the kernel event to be recorded

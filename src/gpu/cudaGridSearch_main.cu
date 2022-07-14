@@ -47,12 +47,17 @@
 
 #include "stb_image.h"
 
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+
+#include "stb_image_write.h"
+
 #define PI 3.14159265
 
 #define grid_dimension 4        // the dimension of the grid, e.g., 1 => 1D grid, 2 => 2D grid, 3=> 3D grid, etc.
+#define CHANNELS 3
 typedef float grid_precision;   // the type of values in the grid, e.g., float, double, int, etc.
 typedef float func_precision;   // the type of values taken by the error function, e.g., float, double, int, etc.
-typedef unsigned char pixel_precision; // the type of values in the image, e.g., float, double, int, etc.
+typedef uint8_t pixel_precision; // the type of values in the image, e.g., float, double, int, etc.
 
 // typedef func_byvalue_t<func_precision, grid_precision, grid_dimension, CudaImage<pixel_precision>, CudaImage<pixel_precision> > image_err_func_byvalue;
 
@@ -62,9 +67,9 @@ typedef unsigned char pixel_precision; // the type of values in the image, e.g.,
 
 // grid_mi
 typedef func_byvalue_t<func_precision, grid_precision, grid_dimension,
-        unsigned char *, unsigned char *, int, int, int, int> image_err_func_byvalue;
+        CudaImage<pixel_precision, CHANNELS>, CudaImage<pixel_precision, CHANNELS> > image_err_func_byvalue;
 __device__ image_err_func_byvalue dev_func_byvalue_ptr = grid_mi<func_precision, grid_precision,
-        grid_dimension, pixel_precision>;
+        grid_dimension, CHANNELS, pixel_precision>;
 
 #define cudaCheckErrors(msg) \
     do { \
@@ -83,11 +88,10 @@ void cxxopts_integration(cxxopts::Options &options) {
     options.add_options()
             ("i_ref", "Reference Image (image in the reference coordinate frame)", cxxopts::value<std::string>())
             ("i_mov", "Moved Image (image in the measured coordinate frame)", cxxopts::value<std::string>())
-            //("f,format", "Data format {GOTCHA, Sandia, <auto>}", cxxopts::value<std::string>()->default_value("auto"))
-            //("p,polarity", "Polarity {HH,HV,VH,VV,<any>}", cxxopts::value<std::string>()->default_value("any"))
             ("d,debug", "Enable debugging", cxxopts::value<bool>()->default_value("false"))
             ("r,dynrange", "Dynamic Range (dB) <70 dB>", cxxopts::value<float>()->default_value("70"))
-            ("o,output", "Output file <sar_image.bmp>", cxxopts::value<std::string>()->default_value("sar_image.bmp"))
+            ("o,output", "Output file <output_image.png>",
+             cxxopts::value<std::string>()->default_value("output_image.png"))
             ("h,help", "Print usage");
 }
 
@@ -99,6 +103,19 @@ void printMatrix(double **matrix, int ROWS, int COLUMNS) {
         }
         std::cout << std::endl;
     }
+}
+
+/*
+ * Case Insensitive Implementation of endsWith()
+ * It checks if the string 'mainStr' ends with given string 'toMatch'
+ */
+bool endsWithCaseInsensitive(std::string mainStr, std::string toMatch) {
+    auto it = toMatch.begin();
+    return mainStr.size() >= toMatch.size() &&
+           std::all_of(std::next(mainStr.begin(), mainStr.size() - toMatch.size()), mainStr.end(),
+                       [&it](const char &c) {
+                           return ::tolower(c) == ::tolower(*(it++));
+                       });
 }
 
 // test grid search
@@ -127,25 +144,26 @@ pixel_precision imageC_data[6 * 6] = {1, 1, 0, 0, 0, 0,
 };
 
 int main(int argc, char **argv) {
+
+    // Argument parsing
     cxxopts::Options options("cuda_gridsearch", "UNC Charlotte Machine Vision Lab CUDA-accelerated grid search code.");
     cxxopts_integration(options);
-
     auto result = options.parse(argc, argv);
-
-    std::string img_fixed_filename, img_moved_filename;
+    std::string img_fixed_filename, img_moved_filename, img_out_filename;
     if (result.count("i_ref")) {
         img_fixed_filename = result["i_ref"].as<std::string>();
     } else {
-        std::cerr << "No input reference image was provided. Exiting.." << std::endl;
+        std::cerr << "No input reference image filename was provided. Exiting.." << std::endl;
         return EXIT_FAILURE;
     }
     if (result.count("i_mov")) {
         img_moved_filename = result["i_mov"].as<std::string>();
     } else {
-        std::cerr << "No input moving image was provided. Exiting.." << std::endl;
+        std::cerr << "No input moving image filename was provided. Exiting.." << std::endl;
         return EXIT_FAILURE;
     }
-
+    img_out_filename = result["output"].as<std::string>();
+    std::cerr << "Output image filename is " << img_out_filename << "." << std::endl;
     if (result.count("help")) {
         std::cout << options.help() << std::endl;
         return EXIT_SUCCESS;
@@ -160,55 +178,34 @@ int main(int argc, char **argv) {
     checkCudaErrors(cudaGetDevice(&cuda_device));
     checkCudaErrors(cudaGetDeviceProperties(&deviceProp, cuda_device));
 
-    // Original
-
-    // CudaImage<pixel_precision> m1(6, 6);
-    // CudaImage<pixel_precision> m2(6, 6);
-
-    // ck(cudaMalloc(&m1.data(), m1.bytesSize()));
-    // ck(cudaMalloc(&m2.data(), m2.bytesSize()));
-
-    // m1.setValuesFromVector(std::vector<pixel_precision>(imageA_data, imageA_data + 6 * 6));
-    // m2.setValuesFromVector(std::vector<pixel_precision>(imageA_data, imageA_data + 6 * 6));
-
-    // m1.display("m1");
-    // m2.display("m2");
-
-    // std::vector<grid_precision> start_point = {(grid_precision) -m2.width() / 2, (grid_precision) -m2.height() / 2};
-    // std::vector<grid_precision> end_point = {(grid_precision) std::abs(m1.width() - (m2.width() / 2)),
-    //                                          (grid_precision) std::abs(m1.height() - (m2.height() / 2))};
-    // std::vector<grid_precision> num_samples = {(grid_precision) 10000, (grid_precision) 10000};
-
-    // Mutual Information
-
-    if (argc < 3) {
-        printf("Args: FixedImage MovingImage\n");
-        return 1;
-    }
-
+    // Load input images from disk
     int xf, yf, nf;
-
-    unsigned char *dataf = stbi_load(img_fixed_filename.c_str(), &xf, &yf, &nf, 1);
+    uint8_t *dataf = stbi_load(img_fixed_filename.c_str(), &xf, &yf, &nf, CHANNELS);
     if (dataf == NULL) {
         std::cerr << "Reference image " + img_fixed_filename + " failed to load!" << std::endl;
         return EXIT_FAILURE;
     }
-
     int xm, ym, nm;
-
-    unsigned char *datam = stbi_load(img_moved_filename.c_str(), &xm, &ym, &nm, 1);
+    uint8_t *datam = stbi_load(img_moved_filename.c_str(), &xm, &ym, &nm, CHANNELS);
     if (datam == NULL) {
         std::cerr << "Moving image " + img_moved_filename + " failed to load!" << std::endl;
         return EXIT_FAILURE;
     }
 
-    unsigned char *imagef;
-    checkCudaErrors(cudaMalloc(&imagef, xf * yf * sizeof(unsigned char)));
-    checkCudaErrors(cudaMemcpy(imagef, dataf, xf * yf * sizeof(unsigned char), cudaMemcpyHostToDevice));
+    // number of components must be equal on construction
+    assert(nf == CHANNELS && nm == CHANNELS);
 
-    unsigned char *imagem;
-    checkCudaErrors(cudaMalloc(&imagem, xm * ym * sizeof(unsigned char)));
-    checkCudaErrors(cudaMemcpy(imagem, datam, xm * ym * sizeof(unsigned char), cudaMemcpyHostToDevice));
+    CudaImage<uint8_t, CHANNELS> image_fix(yf, xf);
+    CudaImage<uint8_t, CHANNELS> image_mov(ym, xm);
+
+    checkCudaErrors(cudaMalloc(&image_fix.data(), image_fix.bytesSize()));
+    checkCudaErrors(cudaMemcpy(image_fix.data(), dataf, image_fix.bytesSize(), cudaMemcpyHostToDevice));
+
+    checkCudaErrors(cudaMalloc(&image_mov.data(), image_mov.bytesSize()));
+    checkCudaErrors(cudaMemcpy(image_mov.data(), datam, image_mov.bytesSize(), cudaMemcpyHostToDevice));
+
+    stbi_image_free(dataf);
+    stbi_image_free(datam);
 
     checkCudaErrors(cudaDeviceSetLimit(cudaLimitMallocHeapSize, 1 << 30));
 
@@ -221,7 +218,7 @@ int main(int argc, char **argv) {
                                                (grid_precision) 1};
 
     CudaGrid<grid_precision, grid_dimension> translation_xy_grid;
-    ck(cudaMalloc(&translation_xy_grid.data(), translation_xy_grid.bytesSize()));
+    checkCudaErrors(cudaMalloc(&translation_xy_grid.data(), translation_xy_grid.bytesSize()));
 
     translation_xy_grid.setStartPoint(start_point);
     translation_xy_grid.setEndPoint(end_point);
@@ -232,7 +229,7 @@ int main(int argc, char **argv) {
     translation_xy_grid.getAxisSampleCounts(axis_sample_counts);
 
     CudaTensor<func_precision, grid_dimension> func_values(axis_sample_counts);
-    ck(cudaMalloc(&func_values.data(), func_values.bytesSize()));
+    checkCudaErrors(cudaMalloc(&func_values.data(), func_values.bytesSize()));
     //func_values.fill(0);
 
     // first template argument is the error function return type
@@ -240,13 +237,14 @@ int main(int argc, char **argv) {
     CudaGridSearcher<func_precision, grid_precision, grid_dimension> translation_xy_gridsearcher(translation_xy_grid,
                                                                                                  func_values);
 
+    // Mutual Information
     // Copy device function pointer for the function having by-value parameters to host side
     cudaMemcpyFromSymbol(&host_func_byval_ptr, dev_func_byvalue_ptr,
                          sizeof(image_err_func_byvalue));
 
     //translation_xy_gridsearcher.search(host_func_byval_ptr, m1, m2);
     // translation_xy_gridsearcher.search_by_value(host_func_byval_ptr, m1, m2);
-    translation_xy_gridsearcher.search_by_value_stream(host_func_byval_ptr, 10000, 1, imagem, imagef, xm, ym, xf, yf);
+    translation_xy_gridsearcher.search_by_value_stream(host_func_byval_ptr, 10000, 1, image_mov, image_fix);
 
 //    func_values.display();
 
@@ -262,14 +260,25 @@ int main(int argc, char **argv) {
     }
     std::cout << "}" << std::endl;
 
+    // Write an output image to disk
+    pixel_precision *hostValues;
+    checkCudaErrors(cudaMallocHost(&hostValues, image_fix.bytesSize()));
+    checkCudaErrors(cudaMemcpy(hostValues, image_fix.data(), image_fix.bytesSize(), cudaMemcpyDeviceToHost));
+    if (endsWithCaseInsensitive(img_out_filename, ".png")) {
+        stbi_write_png(img_out_filename.c_str(), image_fix.width(), image_fix.height(), CHANNELS, hostValues,
+                       image_fix.width() * sizeof(pixel_precision) * CHANNELS);
+        // You have to use 3 comp for complete jpg file. If not, the image will be grayscale or nothing.
+    } else if (endsWithCaseInsensitive(img_out_filename, ".jpg")) {
+        stbi_write_jpg(img_out_filename.c_str(), image_fix.width(), image_fix.height(), CHANNELS, hostValues, 95);
+    } else {
+        std::cout << "Filename suffix has image format not recognized." << std::endl;
+    }
+    cudaFreeHost(hostValues);
+
     // Clean memory
-    // ck(cudaFree(m1.data()));
-    // ck(cudaFree(m2.data()));
-    ck(cudaFree(imagef));
-    ck(cudaFree(imagem));
-    ck(cudaFree(translation_xy_grid.data()));
-    ck(cudaFree(func_values.data()));
-    stbi_image_free(dataf);
-    stbi_image_free(datam);
+    checkCudaErrors(cudaFree(image_fix.data()));
+    checkCudaErrors(cudaFree(image_mov.data()));
+    checkCudaErrors(cudaFree(translation_xy_grid.data()));
+    checkCudaErrors(cudaFree(func_values.data()));
     return EXIT_SUCCESS;
 }
