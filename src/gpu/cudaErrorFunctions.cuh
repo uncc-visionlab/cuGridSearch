@@ -166,5 +166,74 @@ averageAbsoluteDifferenceH(nv_ext::Vec<grid_precision, D> &H, CudaImage<pixType>
     return (func_precision) sum_of_absolute_differences / num_errors;
 }
 
+template<typename func_precision, typename grid_precision, uint32_t D, uint32_t CHANNELS, typename pixType>
+CUDAFUNCTION func_precision calcSQD(nv_ext::Vec<grid_precision, D> &H,
+    CudaImage<pixType, CHANNELS> img_moved, CudaImage<pixType, CHANNELS> img_fixed) {
+    
+    int colsf = img_fixed.width();
+    int rowsf = img_fixed.height();
+    int colsm = img_moved.width();
+    int rowsm = img_moved.height();
+
+    func_precision output = 0;
+    
+    for(int x = 0; x < colsm; x++) {
+        for (int y = 0; y < rowsm; y++) {
+            float new_x = float(H[3]*(x-colsm/2)*cos(H[2]) - (y-rowsm/2)*sin(H[2]) + H[0] + H[3]*colsm/2);
+            float new_y = float((x-colsm/2)*sin(H[2]) + H[3]*(y-rowsm/2)*cos(H[2]) + H[1] + H[3]*rowsm/2);
+
+            for(int c = 0; c < CHANNELS; c++) {
+                float temp = 0;
+    
+                if ((new_x >= 0 && new_x < colsf) && (new_y >= 0 && new_y < rowsf)) {
+                    float value = img_fixed.valueAt_bilinear(new_y, new_x, c);
+    
+                    temp = value/255.0f;
+                }
+    
+                output += (temp - img_moved.valueAt(y, x, c)/255.0f) * (temp - img_moved.valueAt(y, x, c)/255.0f);
+            }
+        }
+    }
+
+    return output;
+}
+
+template<typename func_precision, typename grid_precision, uint32_t D, uint32_t CHANNELS, typename pixType>
+CUDAFUNCTION func_precision calcNCC(nv_ext::Vec<grid_precision, D> &H,
+    CudaImage<pixType, CHANNELS> img_moved, CudaImage<pixType, CHANNELS> img_fixed) {
+
+    int colsf = img_fixed.width();
+    int rowsf = img_fixed.height();
+    int colsm = img_moved.width();
+    int rowsm = img_moved.height();
+
+    float i1 = 0;
+    float i2 = 0;
+    float ic = 0;
+    
+    for(int x = 0; x < colsm; x++) {
+        for (int y = 0; y < rowsm; y++) {
+            float new_x = float(H[3]*(x-colsm/2)*cos(H[2]) - (y-rowsm/2)*sin(H[2]) + H[0] + H[3]*colsm/2);
+            float new_y = float((x-colsm/2)*sin(H[2]) + H[3]*(y-rowsm/2)*cos(H[2]) + H[1] + H[3]*rowsm/2);
+
+            for(int c = 0; c < CHANNELS; c++) {
+                float temp = 0;
+    
+                if ((new_x >= 0 && new_x < colsf) && (new_y >= 0 && new_y < rowsf)) {
+                    float value = img_fixed.valueAt_bilinear(new_y, new_x, c);
+    
+                    temp = value/255.0f;
+                }
+    
+                i1 += img_moved.valueAt(y, x, c)/255.0f * img_moved.valueAt(y, x, c)/255.0f;
+                i2 += temp * temp;
+                ic += (img_moved.valueAt(y, x, c)/255.0f * temp) * (img_moved.valueAt(y, x, c)/255.0f * temp);
+            }
+        }
+    }
+
+    return (func_precision) -1 * ic / (i1 * i2);
+}
 
 #endif //CUDAERRORFUNCTIONS_CUH

@@ -82,4 +82,109 @@ averageAbsoluteDifference_stream(nv_ext::Vec<grid_precision, D> &t, CudaImage<pi
     }
 }
 
+template<typename func_precision, typename grid_precision, uint32_t D, uint32_t CHANNELS, typename pixType>
+__device__ func_precision calcNCCstream(nv_ext::Vec<grid_precision, D> &H,
+                        CudaImage<pixType, CHANNELS> img_moved, CudaImage<pixType, CHANNELS> img_fixed) {
+    int y = blockDim.x * blockIdx.x + threadIdx.x;
+    if(y >= img_moved.height()) 
+        return;
+
+    int colsf = img_fixed.width();
+    int rowsf = img_fixed.height();
+    int colsm = img_moved.width();
+    int rowsm = img_moved.height();
+
+    __shared__ float i1[THREADS_PER_BLOCK];
+    __shared__ float i2[THREADS_PER_BLOCK];
+    __shared__ float ic[THREADS_PER_BLOCK];
+
+    i1[y] = 0;
+    i2[y] = 0;
+    ic[y] = 0;
+
+    for(int x = 0; x < colsm; x++) {
+        float new_x = float(H[3] * (x - colsm / 2) * cos(H[2]) - ( y - rowsm / 2) * sin(H[2]) + H[0] + H[3] * colsm / 2);
+        float new_y = float((x - colsm / 2) * sin(H[2]) + H[3] * (y - rowsm / 2) * cos(H[2]) + H[1] + H[3] * rowsm / 2);
+        
+        for(int c = 0; c < CHANNELS; c++) {
+            float temp = 0;
+
+            if ((new_x >= 0 && new_x < colsf) && (new_y >= 0 && new_y < rowsf)) {
+                float value = img_fixed.valueAt_bilinear(new_y, new_x, c);
+                temp = value/255.0f;
+            }
+
+            i1[y] += img_moved.valueAt(y, x, c)/255.0f * img_moved.valueAt(y, x, c)/255.0f;
+            i2[y] += temp * temp;
+            ic[y] += (img_moved.valueAt(y, x, c)/255.0f * temp) * (img_moved.valueAt(y, x, c)/255.0f * temp);
+        }
+    }
+
+    __syncthreads();
+
+    if(threadIdx.x == 0) {
+        float i1t = 0;
+        float i2t = 0;
+        float ict = 0;
+
+        for(int i = 0; i < img_moved.height(); i++) {
+            i1t += i1[i];
+            i2t += i2[i];
+            ict += ic[i];
+        }
+        if(i1t > 0 && i2t > 0)
+            return (func_precision) -1 * ict / (i1t * i2t);
+        else
+            return (func_precision) 0;
+    } else
+        return (func_precision) 0;
+}
+
+template<typename func_precision, typename grid_precision, uint32_t D, uint32_t CHANNELS, typename pixType>
+__device__ func_precision calcSQDstream(nv_ext::Vec<grid_precision, D> &H,
+                        CudaImage<pixType, CHANNELS> img_moved, CudaImage<pixType, CHANNELS> img_fixed) {
+    int y = blockDim.x * blockIdx.x + threadIdx.x;
+
+    if(y >= img_moved.height()) return;
+
+    int colsf = img_fixed.width();
+    int rowsf = img_fixed.height();
+    int colsm = img_moved.width();
+    int rowsm = img_moved.height();
+
+    __shared__ float errorTemp[THREADS_PER_BLOCK];
+
+    errorTemp[y] = 0;
+
+    for(int x = 0; x < colsm; x++) {
+        float new_x = float(H[3] * (x - colsm / 2) * cos(H[2]) - ( y - rowsm / 2) * sin(H[2]) + H[0] + H[3] * colsm / 2);
+        float new_y = float((x - colsm / 2) * sin(H[2]) + H[3] * (y - rowsm / 2) * cos(H[2]) + H[1] + H[3] * rowsm / 2);
+
+        for(int c = 0; c < CHANNELS; c++) {
+            float temp = 0;
+
+            if ((new_x >= 0 && new_x < colsf) && (new_y >= 0 && new_y < rowsf)) {
+                float value = img_fixed.valueAt_bilinear(new_y, new_x, c);
+
+                temp = value/255.0f;
+            }
+
+            errorTemp[y] += (temp - img_moved.valueAt(y, x, c)/255.0f) * (temp - img_moved.valueAt(y, x, c)/255.0f);
+        }
+    }
+
+    __syncthreads();
+
+    if(threadIdx.x == 0) {
+        func_precision output = 0;
+
+        for(int i = 0; i < img_moved.height(); i++) {
+            output += errorTemp[i];
+        }
+
+        return output;
+    } else
+        return (func_precision) 100000000;
+}
+
 #endif //CUDAERRORFUNCTIONSSTREAMS_CUH
