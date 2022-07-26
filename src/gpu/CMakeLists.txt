@@ -25,6 +25,12 @@ add_executable(${PROJECT_NAME}_main
 target_compile_options(${PROJECT_NAME}_main PUBLIC --extended-lambda --expt-relaxed-constexpr)
 target_link_libraries(${PROJECT_NAME}_main -no-pie ${CUDA_LIBRARIES} ${CUDA_CUFFT_LIBRARIES})
 
+add_executable(${PROJECT_NAME}_main_mi
+        cudaGridSearch_main_mi.cu
+        cudaErrorFunctions.cuh)
+target_compile_options(${PROJECT_NAME}_main_mi PUBLIC --extended-lambda --expt-relaxed-constexpr)
+target_link_libraries(${PROJECT_NAME}_main_mi -no-pie ${CUDA_LIBRARIES} ${CUDA_CUFFT_LIBRARIES})
+
 add_executable(cudaGridSearch_example1
         cudaGridSearch_example1.cu
         cudaErrorFunctions.cuh

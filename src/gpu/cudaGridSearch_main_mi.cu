@@ -55,9 +55,36 @@
 
 #define PI 3.14159265
 
+template<typename pixType, uint8_t D, uint8_t CHANNELS>
+__global__ void transformImage(nv_ext::Vec<float, D> H,
+                               CudaImage<pixType, CHANNELS> img_in,
+                               CudaImage<pixType, CHANNELS> img_out) {
+    int colsm = img_in.width();
+    int rowsm = img_in.height();
+    // In case H < 4 //Similarity transform
+    float cpH[4] = {0.0, 0.0, 0.0, 1.0};
+    for (int i = 0; i < D; i++) {
+        cpH[i] = H[i];
+    }
+    // Transform the image
+    float ct = cos(H[2]);
+    float st = sin(H[2]);
+    for (int x = 0; x < colsm; x++) {
+        for (int y = 0; y < rowsm; y++) {
+            for (int c = 0; c < CHANNELS; c++) {
+                float new_x = (cpH[3] * (x - colsm / 2) * ct - (y - rowsm / 2) * st + cpH[0] + cpH[3] * colsm / 2);
+                float new_y = ((x - colsm / 2) * st + cpH[3] * (y - rowsm / 2) * ct + cpH[1] + cpH[3] * rowsm / 2);
+                if (img_out.inImage(new_y, new_x)) {
+                    img_out.template at<float>(new_y, new_x) = img_in.template at<float>(y, x);
+                }
+            }
+        }
+    }
+}
+
 #define grid_dimension 4        // the dimension of the grid, e.g., 1 => 1D grid, 2 => 2D grid, 3=> 3D grid, etc.
 #define CHANNELS 1
-#define DEPTH 3
+#define DEPTH 1
 typedef float grid_precision;   // the type of values in the grid, e.g., float, double, int, etc.
 typedef float func_precision;   // the type of values taken by the error function, e.g., float, double, int, etc.
 typedef uint8_t pixel_precision; // the type of values in the image, e.g., float, double, int, etc.
@@ -78,8 +105,10 @@ typedef func_byvalue_t<func_precision, grid_precision, grid_dimension,
 
 // __device__ image_err_func_byvalue dev_func_byvalue_ptr = grid_miStream<func_precision, grid_precision,
 //         grid_dimension, CHANNELS, pixel_precision>;
-__device__ image_err_func_byvalue dev_func_byvalue_ptr = calcMI<func_precision, grid_precision,
+__device__ image_err_func_byvalue dev_func_byvalue_ptr = calcMIstream<func_precision, grid_precision,
         grid_dimension, CHANNELS, pixel_precision>;
+//__device__ image_err_func_byvalue dev_func_byvalue_ptr = calcMI<func_precision, grid_precision,
+//        grid_dimension, CHANNELS, pixel_precision>;
 
 #define cudaCheckErrors(msg) \
     do { \
@@ -203,7 +232,7 @@ int main(int argc, char **argv) {
     }
 
     // number of components must be equal on construction
-    printf("%d %d\n",nf, nm);
+    printf("%d %d\n", nf, nm);
     //assert(nf == CHANNELS && nm == CHANNELS);
 
     CudaImage<uint8_t, CHANNELS> image_fix(yf, xf);
@@ -213,11 +242,11 @@ int main(int argc, char **argv) {
     float h_px[binN] = {0};
     CudaImage<float, 1> d_px(binN, 1);
     CudaImage<float, 1> d_py(binN, 1);
-    CudaImage<float, 1> d_pxy(binN * binN, 1);
+    CudaImage<float, 1> d_pxy(binN, binN);
 
-    for (int i = 0; i < ym * xm; i++) {
-        unsigned long temp = datam[i] / (256 / binN);
-        h_px[temp] += (1.0f / ym * xm);
+    for (int i = 0; i < yf * xf; i++) {
+        int temp = dataf[i] / (256 / binN);
+        h_px[temp] += (1.0f / (yf * xf));
     }
 
     checkCudaErrors(cudaMalloc(&d_px.data(), d_px.bytesSize()));
@@ -237,7 +266,7 @@ int main(int argc, char **argv) {
     stbi_image_free(dataf);
     stbi_image_free(datam);
 
-    checkCudaErrors(cudaDeviceSetLimit(cudaLimitMallocHeapSize, (size_t)(1 << 30)));
+    checkCudaErrors(cudaDeviceSetLimit(cudaLimitMallocHeapSize, (size_t) (1 << 30)));
 
     // Example
     // Fixed 581x593
@@ -252,20 +281,21 @@ int main(int argc, char **argv) {
                                                (grid_precision) 1};
     std::vector<grid_precision> end_point = {(grid_precision) xf - xm / 2, (grid_precision) yf - ym / 2,
                                              (grid_precision) 0, (grid_precision) 1};
-    std::vector<grid_precision> num_samples = {(grid_precision) (xf + 1), (grid_precision) (yf + 1), (grid_precision) 1,
+    std::vector<grid_precision> num_samples = {(grid_precision) (xf + 1) / 4, (grid_precision) (yf + 1) / 4,
+                                               (grid_precision) 1,
                                                (grid_precision) 1};
 
-    CudaGrid<grid_precision, grid_dimension> translation_xy_grid;
-    checkCudaErrors(cudaMalloc(&translation_xy_grid.data(), translation_xy_grid.bytesSize()));
+    CudaGrid<grid_precision, grid_dimension> affineTransform_grid;
+    checkCudaErrors(cudaMalloc(&affineTransform_grid.data(), affineTransform_grid.bytesSize()));
 
     for (int iii = 0; iii < DEPTH; iii++) {
-        translation_xy_grid.setStartPoint(start_point);
-        translation_xy_grid.setEndPoint(end_point);
-        translation_xy_grid.setNumSamples(num_samples);
-        translation_xy_grid.display("translation_xy_grid");
+        affineTransform_grid.setStartPoint(start_point);
+        affineTransform_grid.setEndPoint(end_point);
+        affineTransform_grid.setNumSamples(num_samples);
+        affineTransform_grid.display("affineTransform_grid");
 
         grid_precision axis_sample_counts[grid_dimension];
-        translation_xy_grid.getAxisSampleCounts(axis_sample_counts);
+        affineTransform_grid.getAxisSampleCounts(axis_sample_counts);
 
         CudaTensor<func_precision, grid_dimension> func_values(axis_sample_counts);
         checkCudaErrors(cudaMalloc(&func_values.data(), func_values.bytesSize()));
@@ -273,35 +303,37 @@ int main(int argc, char **argv) {
 
         // first template argument is the error function return type
         // second template argument is the grid point value type
-        CudaGridSearcher<func_precision, grid_precision, grid_dimension> translation_xy_gridsearcher(translation_xy_grid,
-                                                                                                    func_values);
+        CudaGridSearcher<func_precision, grid_precision, grid_dimension> affineTransform_gridsearcher(
+                affineTransform_grid,
+                func_values);
 
         // Mutual Information
         // Copy device function pointer for the function having by-value parameters to host side
         cudaMemcpyFromSymbol(&host_func_byval_ptr, dev_func_byvalue_ptr,
-                            sizeof(image_err_func_byvalue));
+                             sizeof(image_err_func_byvalue));
 
-        //translation_xy_gridsearcher.search(host_func_byval_ptr, m1, m2);
-        // translation_xy_gridsearcher.search_by_value(host_func_byval_ptr, m1, m2);
-        // translation_xy_gridsearcher.search_by_value_stream(host_func_byval_ptr, 10000, image_mov.height(), image_mov, image_fix, d_px, d_py, d_pxy);
-        // translation_xy_gridsearcher.search_by_value_stream(host_func_byval_ptr, 10000, 1, image_mov, image_fix);
-        translation_xy_gridsearcher.search_by_value(host_func_byval_ptr, image_mov, image_fix, d_px, d_py, d_pxy);
+        //affineTransform_gridsearcher.search(host_func_byval_ptr, m1, m2);
+        // affineTransform_gridsearcher.search_by_value(host_func_byval_ptr, m1, m2);
+        affineTransform_gridsearcher.search_by_value_stream(host_func_byval_ptr, 10000, image_mov.height(), image_mov,
+                                                            image_fix, d_px, d_py, d_pxy);
+        // affineTransform_gridsearcher.search_by_value_stream(host_func_byval_ptr, 10000, 1, image_mov, image_fix);
+//        affineTransform_gridsearcher.search_by_value(host_func_byval_ptr, image_mov, image_fix, d_px, d_py, d_pxy);
 
-    //    func_values.display();
+        //    func_values.display();
 
         func_precision min_value;
         int32_t min_value_index1d;
         func_values.find_extrema(min_value, min_value_index1d);
 
         grid_precision min_grid_point[grid_dimension];
-        translation_xy_grid.getGridPoint(min_grid_point, min_value_index1d);
+        affineTransform_grid.getGridPoint(min_grid_point, min_value_index1d);
         std::cout << "Minimum found at point p = { ";
         for (int d = 0; d < grid_dimension; d++) {
             std::cout << min_grid_point[d] << ((d < grid_dimension - 1) ? ", " : " ");
-            if(num_samples[d]/2 > 2) {
-                start_point[d] = min_grid_point[d] - (end_point[d]-start_point[d])/4;
-                end_point[d] = min_grid_point[d] + (end_point[d]-start_point[d])/4;
-                num_samples[d] = ceil(num_samples[d]/2);
+            if (num_samples[d] / 2 > 2) {
+                start_point[d] = min_grid_point[d] - (end_point[d] - start_point[d]) / 4;
+                end_point[d] = min_grid_point[d] + (end_point[d] - start_point[d]) / 4;
+                num_samples[d] = ceil(num_samples[d] / 2);
             } else {
                 start_point[d] = min_grid_point[d];
                 end_point[d] = min_grid_point[d];
@@ -312,16 +344,24 @@ int main(int argc, char **argv) {
 
         checkCudaErrors(cudaFree(func_values.data()));
     }
+
     // Write an output image to disk
+    CudaImage<uint8_t, CHANNELS> image_out(ym, xm);
+    checkCudaErrors(cudaMalloc(&image_out.data(), image_out.bytesSize()));
+    checkCudaErrors(cudaMemset(image_out.data(), 0, image_out.bytesSize()));
+    nv_ext::Vec<float, 4> H;
+    H[0] = H[1] = 50; H[2] = 1.0; H[3] = 1.0;
+    transformImage<uint8_t, 4, CHANNELS><<<1, 1>>>(H, image_mov, image_out);
+
     pixel_precision *hostValues;
-    checkCudaErrors(cudaMallocHost(&hostValues, image_fix.bytesSize()));
-    checkCudaErrors(cudaMemcpy(hostValues, image_fix.data(), image_fix.bytesSize(), cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaMallocHost(&hostValues, image_out.bytesSize()));
+    checkCudaErrors(cudaMemcpy(hostValues, image_out.data(), image_out.bytesSize(), cudaMemcpyDeviceToHost));
     if (endsWithCaseInsensitive(img_out_filename, ".png")) {
-        stbi_write_png(img_out_filename.c_str(), image_fix.width(), image_fix.height(), CHANNELS, hostValues,
+        stbi_write_png(img_out_filename.c_str(), image_out.width(), image_out.height(), CHANNELS, hostValues,
                        image_fix.width() * sizeof(pixel_precision) * CHANNELS);
         // You have to use 3 comp for complete jpg file. If not, the image will be grayscale or nothing.
     } else if (endsWithCaseInsensitive(img_out_filename, ".jpg")) {
-        stbi_write_jpg(img_out_filename.c_str(), image_fix.width(), image_fix.height(), CHANNELS, hostValues, 95);
+        stbi_write_jpg(img_out_filename.c_str(), image_out.width(), image_out.height(), CHANNELS, hostValues, 95);
     } else {
         std::cout << "Filename suffix has image format not recognized." << std::endl;
     }
@@ -330,7 +370,7 @@ int main(int argc, char **argv) {
     // Clean memory
     checkCudaErrors(cudaFree(image_fix.data()));
     checkCudaErrors(cudaFree(image_mov.data()));
-    checkCudaErrors(cudaFree(translation_xy_grid.data()));
+    checkCudaErrors(cudaFree(affineTransform_grid.data()));
     checkCudaErrors(cudaFree(d_px.data()));
     checkCudaErrors(cudaFree(d_py.data()));
     checkCudaErrors(cudaFree(d_pxy.data()));
