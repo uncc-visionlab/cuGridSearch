@@ -59,23 +59,19 @@ template<typename pixType, uint8_t D, uint8_t CHANNELS>
 __global__ void transformImage(nv_ext::Vec<float, D> H,
                                CudaImage<pixType, CHANNELS> img_in,
                                CudaImage<pixType, CHANNELS> img_out) {
-    int colsm = img_in.width();
-    int rowsm = img_in.height();
-    // In case H < 4 //Similarity transform
-    float cpH[4] = {0.0, 0.0, 0.0, 1.0};
-    for (int i = 0; i < D; i++) {
-        cpH[i] = H[i];
-    }
+    int colsm = img_out.width();
+    int rowsm = img_out.height();
     // Transform the image
-    float ct = cos(H[2]);
-    float st = sin(H[2]);
+    float &h11 = H[0], &h12 = H[1], &h13 = H[2], &h21 = H[3], &h22 = H[4], &h23 = H[5], &h31 = H[6], &h32 = H[7];
     for (int x = 0; x < colsm; x++) {
         for (int y = 0; y < rowsm; y++) {
-            for (int c = 0; c < CHANNELS; c++) {
-                float new_x = (cpH[3] * (x - colsm / 2) * ct - (y - rowsm / 2) * st + cpH[0] + cpH[3] * colsm / 2);
-                float new_y = ((x - colsm / 2) * st + cpH[3] * (y - rowsm / 2) * ct + cpH[1] + cpH[3] * rowsm / 2);
-                if (img_out.inImage(new_y, new_x)) {
-                    img_out.template at<float>(new_y, new_x) = img_in.template at<float>(y, x);
+            //float denom = (h11*h22 - h12*h21 - h11*h23*h32 + h12*h23*h31 + h13*h21*h32 - h13*h22*h31);
+            float new_w = ((h21 * h32 - h22 * h31) * x + (h12 * h31 - h11 * h32) * y + h11 * h22 - h12 * h21);
+            float new_x = ((h22 - h23 * h32) * x + (h13 * h32 - h12) * y + h12 * h23 - h13 * h22) / new_w;
+            float new_y = ((h23 * h31 - h21) * x + (h11 - h13 * h31) * y + h13 * h21 - h11 * h23) / new_w;
+            if (img_in.inImage(new_y, new_x)) {
+                for (int c = 0; c < CHANNELS; c++) {
+                    img_out.template at<float>(y, x) = img_in.valueAt_bilinear(new_y, new_x);
                 }
             }
         }
@@ -281,7 +277,7 @@ int main(int argc, char **argv) {
                                                (grid_precision) 1};
     std::vector<grid_precision> end_point = {(grid_precision) xf - xm / 2, (grid_precision) yf - ym / 2,
                                              (grid_precision) 0, (grid_precision) 1};
-    std::vector<grid_precision> num_samples = {(grid_precision) (xf + 1) / 4, (grid_precision) (yf + 1) / 4,
+    std::vector<grid_precision> num_samples = {(grid_precision) (xf + 1) / 14, (grid_precision) (yf + 1) / 14,
                                                (grid_precision) 1,
                                                (grid_precision) 1};
 
@@ -346,12 +342,27 @@ int main(int argc, char **argv) {
     }
 
     // Write an output image to disk
-    CudaImage<uint8_t, CHANNELS> image_out(ym, xm);
+    CudaImage<uint8_t, CHANNELS> image_out(image_mov.height(), image_mov.width());
     checkCudaErrors(cudaMalloc(&image_out.data(), image_out.bytesSize()));
     checkCudaErrors(cudaMemset(image_out.data(), 0, image_out.bytesSize()));
-    nv_ext::Vec<float, 4> H;
-    H[0] = H[1] = 50; H[2] = 1.0; H[3] = 1.0;
-    transformImage<uint8_t, 4, CHANNELS><<<1, 1>>>(H, image_mov, image_out);
+//    float initialH[] = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0};
+    //    linear interpolation in homography / affine matrix space
+    //    https://math.stackexchange.com/questions/612006/decomposing-an-affine-transformation
+    float theta = 5.0 * PI / 180.0; // range 0 - 2*PI
+    float scale = 1.5;  // // range 1 - 2
+    float shearX = 0.2; // range -0.2 - 0.2
+    float shearY = 0.2; // range -0.2 - 0.2
+    float translateX = -10; // range -image.width()/2 - image.width()/2
+    float translateY = -30; // range -image.height()/2 - image.height()/2
+    float keystoneX = 0.0; // range -0.1 - 0.1 ?
+    float keystoneY = 0.0; // range -0.1 - 0.1 ?
+    // Transform does scale, shear, rotate, then translate and finally perspective project per the website
+    // https://math.stackexchange.com/questions/612006/decomposing-an-affine-transformation
+    float initialH[] = {scale * cos(theta) - shearY * sin(theta), shearX * cos(theta) - scale * sin(theta), scale*translateX,
+                        scale * sin(theta) + shearY * cos(theta), shearX * sin(theta) + scale * cos(theta), scale*translateY,
+                        keystoneX, keystoneY};
+    nv_ext::Vec<float, 8> H(initialH);
+    transformImage<uint8_t, 8, CHANNELS><<<1, 1>>>(H, image_mov, image_out);
 
     pixel_precision *hostValues;
     checkCudaErrors(cudaMallocHost(&hostValues, image_out.bytesSize()));
