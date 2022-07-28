@@ -50,14 +50,14 @@
 
 #define PI 3.14159265
 
-#define grid_dimension 4        // the dimension of the grid, e.g., 1 => 1D grid, 2 => 2D grid, 3=> 3D grid, etc.
+#define grid_dimension 8        // the dimension of the grid, e.g., 1 => 1D grid, 2 => 2D grid, 3=> 3D grid, etc.
 #define CHANNELS 3
 typedef float grid_precision;   // the type of values in the grid, e.g., float, double, int, etc.
 typedef float func_precision;   // the type of values taken by the error function, e.g., float, double, int, etc.
 typedef uint8_t pixel_precision; // the type of values in the image, e.g., float, double, int, etc.
 
 typedef func_byvalue_t<func_precision, grid_precision, grid_dimension,
-    CudaImage<pixel_precision, CHANNELS>, CudaImage<pixel_precision, CHANNELS> > image_err_func_byvalue;
+        CudaImage<pixel_precision, CHANNELS>, CudaImage<pixel_precision, CHANNELS> > image_err_func_byvalue;
 
 // create device function pointer for by-value kernel function here
 __device__ image_err_func_byvalue dev_func_byvalue_ptr = averageAbsoluteDifference<func_precision, grid_precision, grid_dimension, CHANNELS, pixel_precision>;
@@ -197,12 +197,50 @@ int main(int argc, char **argv) {
 
     checkCudaErrors(cudaDeviceSetLimit(cudaLimitMallocHeapSize, 1 << 30));
 
+    //    linear interpolation in homography / affine matrix space
+    //    https://math.stackexchange.com/questions/612006/decomposing-an-affine-transformation
+    //    using the parameterization described by Stephane Laurent
+    float theta = 5.0 * PI / 180.0; // range [0, 2*PI]
+    float scaleX = 1.5;  // // range [1, 2]
+    float scaleY = 1.5;  // // range [1, 2]
+    float shearXY = 0.2; // range [-0.2, 0.2]
+    float translateX = -10; // range [-image.width()/2, image.width()/2]
+    float translateY = -30; // range [-image.height()/2, image.height()/2]
+    float keystoneX = 0.0; // range [-0.1, 0.1]
+    float keystoneY = 0.0; // range [-0.1, 0.1]
+    // Transform does scale, shear, rotate, then translate and finally perspective project per the website
+    // https://math.stackexchange.com/questions/612006/decomposing-an-affine-transformation
+    //float initialH[] = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0};
+
+    float initialH[] = {scaleX * cos(theta), scaleY * shearXY * cos(theta) - scaleY * sin(theta), scaleX * translateX,
+                        scaleX * sin(theta), scaleY * shearXY * sin(theta) + scaleY * cos(theta), scaleY * translateY,
+                        keystoneX, keystoneY};
+
     // Example MI
-    std::vector<grid_precision> start_point = {(grid_precision) -xm / 2, (grid_precision) -ym / 2, (grid_precision) 0,
-                                               (grid_precision) 1};
-    std::vector<grid_precision> end_point = {(grid_precision) xf - xm / 2, (grid_precision) yf - ym / 2,
-                                             (grid_precision) 0, (grid_precision) 1};
-    std::vector<grid_precision> num_samples = {(grid_precision) (xf + 1), (grid_precision) (yf + 1)/10, (grid_precision) 1/10,
+    std::vector<grid_precision> start_point = {(grid_precision) -PI / 20, // theta
+                                               (grid_precision) 1, // scaleX
+                                               (grid_precision) 1, // scaleY
+                                               (grid_precision) -0.4,  // shearXY
+                                               (grid_precision) -xm / 2,  // translateX
+                                               (grid_precision) -ym / 2,  // translateY
+                                               (grid_precision) 0, // keystoneX
+                                               (grid_precision) 0  // keystoneY
+    };
+    std::vector<grid_precision> end_point = {(grid_precision) PI / 20,
+                                             (grid_precision) 1.5,
+                                             (grid_precision) 1.5,
+                                             (grid_precision) 0.2,
+                                             (grid_precision) xf - xm / 2,
+                                             (grid_precision) yf - ym / 2,
+                                             (grid_precision) 0,
+                                             (grid_precision) 0};
+    std::vector<grid_precision> num_samples = {(grid_precision) 11,
+                                               (grid_precision) 1,
+                                               (grid_precision) 1,
+                                               (grid_precision) 11,
+                                               (grid_precision) (xf + 1) / 10,
+                                               (grid_precision) (yf + 1) / 10,
+                                               (grid_precision) 1,
                                                (grid_precision) 1};
 
     CudaGrid<grid_precision, grid_dimension> translation_xy_grid;
@@ -247,25 +285,24 @@ int main(int argc, char **argv) {
         std::cout << min_grid_point[d] << ((d < grid_dimension - 1) ? ", " : " ");
     }
     std::cout << "}" << std::endl;
+    float &mtheta = min_grid_point[0];
+    float &mscaleX = min_grid_point[1];
+    float &mscaleY = min_grid_point[2];
+    float &mshearXY = min_grid_point[3];
+    float &mtranslateX = min_grid_point[4];
+    float &mtranslateY = min_grid_point[5];
+    float &mkeystoneX = min_grid_point[6];
+    float &mkeystoneY = min_grid_point[7];
 
-    //    linear interpolation in homography / affine matrix space
-    //    https://math.stackexchange.com/questions/612006/decomposing-an-affine-transformation
-    //    using the parameterization described by Stephane Laurent
-    float theta = 5.0 * PI / 180.0; // range [0, 2*PI]
-    float scaleX = 1.5;  // // range [1, 2]
-    float scaleY = 1.5;  // // range [1, 2]
-    float shearXY = 0.2; // range [-0.2, 0.2]
-    float translateX = -10; // range [-image.width()/2, image.width()/2]
-    float translateY = -30; // range [-image.height()/2, image.height()/2]
-    float keystoneX = 0.0; // range [-0.1, 0.1]
-    float keystoneY = 0.0; // range [-0.1, 0.1]
-    // Transform does scale, shear, rotate, then translate and finally perspective project per the website
-    // https://math.stackexchange.com/questions/612006/decomposing-an-affine-transformation
-    //float initialH[] = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0};
-    float initialH[] = {scaleX * cos(theta), scaleY * shearXY * cos(theta) - scaleY * sin(theta), scaleX * translateX,
-                        scaleX * sin(theta), scaleY * shearXY * sin(theta) + scaleY * cos(theta), scaleY * translateY,
-                        keystoneX, keystoneY};
-    nv_ext::Vec<float, 8> H(initialH);
+    float minH[] = {mscaleX * cos(mtheta),
+                    mscaleY * mshearXY * cos(mtheta) - mscaleY * sin(mtheta),
+                    mscaleX * mtranslateX,
+                    mscaleX * sin(mtheta),
+                    mscaleY * mshearXY * sin(mtheta) + mscaleY * cos(mtheta),
+                    mscaleY * mtranslateY,
+                    mkeystoneX, mkeystoneY};
+//    nv_ext::Vec<float, 8> H(initialH);
+    nv_ext::Vec<float, 8> H(minH);
 
     // Write an output image to disk
     writeTransformedImageToDisk<uint8_t, CHANNELS>(image_mov, H, img_out_filename);

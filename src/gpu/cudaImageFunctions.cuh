@@ -5,6 +5,7 @@
 #ifndef CUGRIDSEARCH_CUDAIMAGEFUNCTIONS_CUH
 #define CUGRIDSEARCH_CUDAIMAGEFUNCTIONS_CUH
 
+#include <cstdlib>
 #include <cstdint>
 #include <string.h>
 #include <vector>
