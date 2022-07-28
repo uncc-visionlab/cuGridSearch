@@ -42,6 +42,7 @@
 #include "cudaErrorFunctionsStreams.cuh"
 #include "cudaErrorFunction_miStreams.cuh"
 #include "cudaErrorFunction_mi.cuh"
+#include "cudaImageFunctions.cuh"
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_FAILURE_USERMSG
@@ -49,35 +50,7 @@
 
 #include "stb_image.h"
 
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-
-#include "stb_image_write.h"
-
 #define PI 3.14159265
-
-template<typename pixType, uint8_t D, uint8_t CHANNELS>
-__global__ void transformImage(nv_ext::Vec<float, D> H,
-                               CudaImage<pixType, CHANNELS> img_in,
-                               CudaImage<pixType, CHANNELS> img_out) {
-    int colsm = img_out.width();
-    int rowsm = img_out.height();
-    // Transform the image
-    float &h11 = H[0], &h12 = H[1], &h13 = H[2], &h21 = H[3], &h22 = H[4], &h23 = H[5], &h31 = H[6], &h32 = H[7];
-    for (int x = 0; x < colsm; x++) {
-        for (int y = 0; y < rowsm; y++) {
-            //float denom = (h11*h22 - h12*h21 - h11*h23*h32 + h12*h23*h31 + h13*h21*h32 - h13*h22*h31);
-            float new_w = ((h21 * h32 - h22 * h31) * x + (h12 * h31 - h11 * h32) * y + h11 * h22 - h12 * h21);
-            float new_x = ((h22 - h23 * h32) * x + (h13 * h32 - h12) * y + h12 * h23 - h13 * h22) / new_w;
-            float new_y = ((h23 * h31 - h21) * x + (h11 - h13 * h31) * y + h13 * h21 - h11 * h23) / new_w;
-            if (img_in.inImage(new_y, new_x)) {
-                for (int c = 0; c < CHANNELS; c++) {
-                    img_out.template at<float>(y, x) = img_in.valueAt_bilinear(new_y, new_x);
-                }
-            }
-        }
-    }
-}
-
 #define grid_dimension 4        // the dimension of the grid, e.g., 1 => 1D grid, 2 => 2D grid, 3=> 3D grid, etc.
 #define CHANNELS 1
 #define DEPTH 1
@@ -124,9 +97,10 @@ void cxxopts_integration(cxxopts::Options &options) {
             ("i_ref", "Reference Image (image in the reference coordinate frame)", cxxopts::value<std::string>())
             ("i_mov", "Moved Image (image in the measured coordinate frame)", cxxopts::value<std::string>())
             ("d,debug", "Enable debugging", cxxopts::value<bool>()->default_value("false"))
-            ("r,dynrange", "Dynamic Range (dB) <70 dB>", cxxopts::value<float>()->default_value("70"))
             ("o,output", "Output file <output_image.png>",
              cxxopts::value<std::string>()->default_value("output_image.png"))
+            ("f,fusedoutput", "Fused output file <output_image_fused.png>",
+             cxxopts::value<std::string>()->default_value("output_image_fused.png"))
             ("h,help", "Print usage");
 }
 
@@ -138,19 +112,6 @@ void printMatrix(double **matrix, int ROWS, int COLUMNS) {
         }
         std::cout << std::endl;
     }
-}
-
-/*
- * Case Insensitive Implementation of endsWith()
- * It checks if the string 'mainStr' ends with given string 'toMatch'
- */
-bool endsWithCaseInsensitive(std::string mainStr, std::string toMatch) {
-    auto it = toMatch.begin();
-    return mainStr.size() >= toMatch.size() &&
-           std::all_of(std::next(mainStr.begin(), mainStr.size() - toMatch.size()), mainStr.end(),
-                       [&it](const char &c) {
-                           return ::tolower(c) == ::tolower(*(it++));
-                       });
 }
 
 // test grid search
@@ -184,7 +145,7 @@ int main(int argc, char **argv) {
     cxxopts::Options options("cuda_gridsearch", "UNC Charlotte Machine Vision Lab CUDA-accelerated grid search code.");
     cxxopts_integration(options);
     auto result = options.parse(argc, argv);
-    std::string img_fixed_filename, img_moved_filename, img_out_filename;
+    std::string img_fixed_filename, img_moved_filename, img_out_filename, img_fused_filename;
     if (result.count("i_ref")) {
         img_fixed_filename = result["i_ref"].as<std::string>();
     } else {
@@ -198,7 +159,9 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
     img_out_filename = result["output"].as<std::string>();
+    img_fused_filename = result["fusedoutput"].as<std::string>();
     std::cerr << "Output image filename is " << img_out_filename << "." << std::endl;
+    std::cerr << "Fused Output image filename is " << img_fused_filename << "." << std::endl;
     if (result.count("help")) {
         std::cout << options.help() << std::endl;
         return EXIT_SUCCESS;
@@ -341,42 +304,30 @@ int main(int argc, char **argv) {
         checkCudaErrors(cudaFree(func_values.data()));
     }
 
-    // Write an output image to disk
-    CudaImage<uint8_t, CHANNELS> image_out(image_mov.height(), image_mov.width());
-    checkCudaErrors(cudaMalloc(&image_out.data(), image_out.bytesSize()));
-    checkCudaErrors(cudaMemset(image_out.data(), 0, image_out.bytesSize()));
-//    float initialH[] = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0};
     //    linear interpolation in homography / affine matrix space
     //    https://math.stackexchange.com/questions/612006/decomposing-an-affine-transformation
-    float theta = 5.0 * PI / 180.0; // range 0 - 2*PI
-    float scale = 1.5;  // // range 1 - 2
-    float shearX = 0.2; // range -0.2 - 0.2
-    float shearY = 0.2; // range -0.2 - 0.2
-    float translateX = -10; // range -image.width()/2 - image.width()/2
-    float translateY = -30; // range -image.height()/2 - image.height()/2
-    float keystoneX = 0.0; // range -0.1 - 0.1 ?
-    float keystoneY = 0.0; // range -0.1 - 0.1 ?
+    //    using the parameterization described by Stephane Laurent
+    float theta = 5.0 * PI / 180.0; // range [0, 2*PI]
+    float scaleX = 1.5;  // // range [1, 2]
+    float scaleY = 1.5;  // // range [1, 2]
+    float shearXY = 0.2; // range [-0.2, 0.2]
+    float translateX = -10; // range [-image.width()/2, image.width()/2]
+    float translateY = -30; // range [-image.height()/2, image.height()/2]
+    float keystoneX = 0.0; // range [-0.1, 0.1]
+    float keystoneY = 0.0; // range [-0.1, 0.1]
     // Transform does scale, shear, rotate, then translate and finally perspective project per the website
     // https://math.stackexchange.com/questions/612006/decomposing-an-affine-transformation
-    float initialH[] = {scale * cos(theta) - shearY * sin(theta), shearX * cos(theta) - scale * sin(theta), scale*translateX,
-                        scale * sin(theta) + shearY * cos(theta), shearX * sin(theta) + scale * cos(theta), scale*translateY,
+    //float initialH[] = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0};
+    float initialH[] = {scaleX * cos(theta), scaleY * shearXY * cos(theta) - scaleY * sin(theta), scaleX * translateX,
+                        scaleX * sin(theta), scaleY * shearXY * sin(theta) + scaleY * cos(theta), scaleY * translateY,
                         keystoneX, keystoneY};
     nv_ext::Vec<float, 8> H(initialH);
-    transformImage<uint8_t, 8, CHANNELS><<<1, 1>>>(H, image_mov, image_out);
 
-    pixel_precision *hostValues;
-    checkCudaErrors(cudaMallocHost(&hostValues, image_out.bytesSize()));
-    checkCudaErrors(cudaMemcpy(hostValues, image_out.data(), image_out.bytesSize(), cudaMemcpyDeviceToHost));
-    if (endsWithCaseInsensitive(img_out_filename, ".png")) {
-        stbi_write_png(img_out_filename.c_str(), image_out.width(), image_out.height(), CHANNELS, hostValues,
-                       image_fix.width() * sizeof(pixel_precision) * CHANNELS);
-        // You have to use 3 comp for complete jpg file. If not, the image will be grayscale or nothing.
-    } else if (endsWithCaseInsensitive(img_out_filename, ".jpg")) {
-        stbi_write_jpg(img_out_filename.c_str(), image_out.width(), image_out.height(), CHANNELS, hostValues, 95);
-    } else {
-        std::cout << "Filename suffix has image format not recognized." << std::endl;
-    }
-    cudaFreeHost(hostValues);
+    // Write an output image to disk
+    writeTransformedImageToDisk<uint8_t, CHANNELS>(image_mov, H, img_out_filename);
+
+    // Write aligned and fused output image to disk
+    writeAlignedAndFusedImageToDisk<uint8_t, CHANNELS>(image_fix, image_mov, H, H, img_fused_filename);
 
     // Clean memory
     checkCudaErrors(cudaFree(image_fix.data()));

@@ -33,8 +33,7 @@ target_link_libraries(${PROJECT_NAME}_main_mi -no-pie ${CUDA_LIBRARIES} ${CUDA_C
 
 add_executable(cudaGridSearch_example1
         cudaGridSearch_example1.cu
-        cudaErrorFunctions.cuh
-        cudaErrorFunctionsStreams.cuh)
+        cudaErrorFunctions.cuh)
 target_compile_options(cudaGridSearch_example1 PUBLIC --extended-lambda --expt-relaxed-constexpr)
 target_link_libraries(cudaGridSearch_example1 ${CUDA_LIBRARIES})
 

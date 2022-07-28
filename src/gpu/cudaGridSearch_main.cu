@@ -40,16 +40,13 @@
 #include "cudaGridSearch.cuh"
 #include "cudaErrorFunctions.cuh"
 #include "cudaErrorFunction_mi.cuh"
+#include "cudaImageFunctions.cuh"
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_FAILURE_USERMSG
 #define STBI_NO_FAILURE_STRINGS
 
 #include "stb_image.h"
-
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-
-#include "stb_image_write.h"
 
 #define PI 3.14159265
 
@@ -59,17 +56,18 @@ typedef float grid_precision;   // the type of values in the grid, e.g., float, 
 typedef float func_precision;   // the type of values taken by the error function, e.g., float, double, int, etc.
 typedef uint8_t pixel_precision; // the type of values in the image, e.g., float, double, int, etc.
 
-// typedef func_byvalue_t<func_precision, grid_precision, grid_dimension, CudaImage<pixel_precision>, CudaImage<pixel_precision> > image_err_func_byvalue;
+typedef func_byvalue_t<func_precision, grid_precision, grid_dimension,
+    CudaImage<pixel_precision, CHANNELS>, CudaImage<pixel_precision, CHANNELS> > image_err_func_byvalue;
 
 // create device function pointer for by-value kernel function here
-// __device__ image_err_func_byvalue dev_func_byvalue_ptr = averageAbsoluteDifference<func_precision, grid_precision, grid_dimension, pixel_precision>;
+__device__ image_err_func_byvalue dev_func_byvalue_ptr = averageAbsoluteDifference<func_precision, grid_precision, grid_dimension, CHANNELS, pixel_precision>;
 //__device__ image_err_func_byvalue dev_func_byvalue_ptr = sumOfAbsoluteDifferences<func_precision, grid_precision, grid_dimension, pixel_precision>;
 
 // grid_mi
-typedef func_byvalue_t<func_precision, grid_precision, grid_dimension,
-        CudaImage<pixel_precision, CHANNELS>, CudaImage<pixel_precision, CHANNELS> > image_err_func_byvalue;
-__device__ image_err_func_byvalue dev_func_byvalue_ptr = grid_mi<func_precision, grid_precision,
-        grid_dimension, CHANNELS, pixel_precision>;
+//typedef func_byvalue_t<func_precision, grid_precision, grid_dimension,
+//        CudaImage<pixel_precision, CHANNELS>, CudaImage<pixel_precision, CHANNELS> > image_err_func_byvalue;
+//__device__ image_err_func_byvalue dev_func_byvalue_ptr = grid_mi<func_precision, grid_precision,
+//        grid_dimension, CHANNELS, pixel_precision>;
 
 #define cudaCheckErrors(msg) \
     do { \
@@ -89,9 +87,10 @@ void cxxopts_integration(cxxopts::Options &options) {
             ("i_ref", "Reference Image (image in the reference coordinate frame)", cxxopts::value<std::string>())
             ("i_mov", "Moved Image (image in the measured coordinate frame)", cxxopts::value<std::string>())
             ("d,debug", "Enable debugging", cxxopts::value<bool>()->default_value("false"))
-            ("r,dynrange", "Dynamic Range (dB) <70 dB>", cxxopts::value<float>()->default_value("70"))
             ("o,output", "Output file <output_image.png>",
              cxxopts::value<std::string>()->default_value("output_image.png"))
+            ("f,fusedoutput", "Fused output file <output_image_fused.png>",
+             cxxopts::value<std::string>()->default_value("output_image_fused.png"))
             ("h,help", "Print usage");
 }
 
@@ -103,19 +102,6 @@ void printMatrix(double **matrix, int ROWS, int COLUMNS) {
         }
         std::cout << std::endl;
     }
-}
-
-/*
- * Case Insensitive Implementation of endsWith()
- * It checks if the string 'mainStr' ends with given string 'toMatch'
- */
-bool endsWithCaseInsensitive(std::string mainStr, std::string toMatch) {
-    auto it = toMatch.begin();
-    return mainStr.size() >= toMatch.size() &&
-           std::all_of(std::next(mainStr.begin(), mainStr.size() - toMatch.size()), mainStr.end(),
-                       [&it](const char &c) {
-                           return ::tolower(c) == ::tolower(*(it++));
-                       });
 }
 
 // test grid search
@@ -149,7 +135,7 @@ int main(int argc, char **argv) {
     cxxopts::Options options("cuda_gridsearch", "UNC Charlotte Machine Vision Lab CUDA-accelerated grid search code.");
     cxxopts_integration(options);
     auto result = options.parse(argc, argv);
-    std::string img_fixed_filename, img_moved_filename, img_out_filename;
+    std::string img_fixed_filename, img_moved_filename, img_out_filename, img_fused_filename;
     if (result.count("i_ref")) {
         img_fixed_filename = result["i_ref"].as<std::string>();
     } else {
@@ -163,7 +149,9 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
     img_out_filename = result["output"].as<std::string>();
+    img_fused_filename = result["fusedoutput"].as<std::string>();
     std::cerr << "Output image filename is " << img_out_filename << "." << std::endl;
+    std::cerr << "Fused Output image filename is " << img_fused_filename << "." << std::endl;
     if (result.count("help")) {
         std::cout << options.help() << std::endl;
         return EXIT_SUCCESS;
@@ -214,7 +202,7 @@ int main(int argc, char **argv) {
                                                (grid_precision) 1};
     std::vector<grid_precision> end_point = {(grid_precision) xf - xm / 2, (grid_precision) yf - ym / 2,
                                              (grid_precision) 0, (grid_precision) 1};
-    std::vector<grid_precision> num_samples = {(grid_precision) (xf + 1), (grid_precision) (yf + 1), (grid_precision) 1,
+    std::vector<grid_precision> num_samples = {(grid_precision) (xf + 1), (grid_precision) (yf + 1)/10, (grid_precision) 1/10,
                                                (grid_precision) 1};
 
     CudaGrid<grid_precision, grid_dimension> translation_xy_grid;
@@ -243,8 +231,8 @@ int main(int argc, char **argv) {
                          sizeof(image_err_func_byvalue));
 
     //translation_xy_gridsearcher.search(host_func_byval_ptr, m1, m2);
-    // translation_xy_gridsearcher.search_by_value(host_func_byval_ptr, m1, m2);
-    translation_xy_gridsearcher.search_by_value_stream(host_func_byval_ptr, 10000, 1, image_mov, image_fix);
+    translation_xy_gridsearcher.search_by_value(host_func_byval_ptr, image_mov, image_fix);
+    //translation_xy_gridsearcher.search_by_value_stream(host_func_byval_ptr, 10000, 1, image_mov, image_fix);
 
 //    func_values.display();
 
@@ -260,20 +248,30 @@ int main(int argc, char **argv) {
     }
     std::cout << "}" << std::endl;
 
+    //    linear interpolation in homography / affine matrix space
+    //    https://math.stackexchange.com/questions/612006/decomposing-an-affine-transformation
+    //    using the parameterization described by Stephane Laurent
+    float theta = 5.0 * PI / 180.0; // range [0, 2*PI]
+    float scaleX = 1.5;  // // range [1, 2]
+    float scaleY = 1.5;  // // range [1, 2]
+    float shearXY = 0.2; // range [-0.2, 0.2]
+    float translateX = -10; // range [-image.width()/2, image.width()/2]
+    float translateY = -30; // range [-image.height()/2, image.height()/2]
+    float keystoneX = 0.0; // range [-0.1, 0.1]
+    float keystoneY = 0.0; // range [-0.1, 0.1]
+    // Transform does scale, shear, rotate, then translate and finally perspective project per the website
+    // https://math.stackexchange.com/questions/612006/decomposing-an-affine-transformation
+    //float initialH[] = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0};
+    float initialH[] = {scaleX * cos(theta), scaleY * shearXY * cos(theta) - scaleY * sin(theta), scaleX * translateX,
+                        scaleX * sin(theta), scaleY * shearXY * sin(theta) + scaleY * cos(theta), scaleY * translateY,
+                        keystoneX, keystoneY};
+    nv_ext::Vec<float, 8> H(initialH);
+
     // Write an output image to disk
-    pixel_precision *hostValues;
-    checkCudaErrors(cudaMallocHost(&hostValues, image_fix.bytesSize()));
-    checkCudaErrors(cudaMemcpy(hostValues, image_fix.data(), image_fix.bytesSize(), cudaMemcpyDeviceToHost));
-    if (endsWithCaseInsensitive(img_out_filename, ".png")) {
-        stbi_write_png(img_out_filename.c_str(), image_fix.width(), image_fix.height(), CHANNELS, hostValues,
-                       image_fix.width() * sizeof(pixel_precision) * CHANNELS);
-        // You have to use 3 comp for complete jpg file. If not, the image will be grayscale or nothing.
-    } else if (endsWithCaseInsensitive(img_out_filename, ".jpg")) {
-        stbi_write_jpg(img_out_filename.c_str(), image_fix.width(), image_fix.height(), CHANNELS, hostValues, 95);
-    } else {
-        std::cout << "Filename suffix has image format not recognized." << std::endl;
-    }
-    cudaFreeHost(hostValues);
+    writeTransformedImageToDisk<uint8_t, CHANNELS>(image_mov, H, img_out_filename);
+
+    // Write aligned and fused output image to disk
+    writeAlignedAndFusedImageToDisk<uint8_t, CHANNELS>(image_fix, image_mov, H, H, img_fused_filename);
 
     // Clean memory
     checkCudaErrors(cudaFree(image_fix.data()));
