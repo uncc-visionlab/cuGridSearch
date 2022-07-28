@@ -72,21 +72,20 @@ __global__ void fuseAlignedImages(nv_ext::Vec<float, D> estimatedH,
                 float new_w = ((h21 * h32 - h22 * h31) * x + (h12 * h31 - h11 * h32) * y + h11 * h22 - h12 * h21);
                 float new_x = ((h22 - h23 * h32) * x + (h13 * h32 - h12) * y + h12 * h23 - h13 * h22) / new_w;
                 float new_y = ((h23 * h31 - h21) * x + (h11 - h13 * h31) * y + h13 * h21 - h11 * h23) / new_w;
-                    switch (c) {
-                        case 1:
-                            if (imageReference.inImage(new_y, new_x)) {
-                                imageFused.template at<float>(y, x, c) = imageReference.valueAt_bilinear(new_y, new_x,
-                                                                                                         fusedChannel);
-                            }
-                            break;
-                        case 0:
-                        case 2:
-                            if (imageMoving.inImage(new_y, new_x)) {
-                                imageFused.template at<float>(y, x, c) = imageMoving.valueAt_bilinear(new_y, new_x,
-                                                                                                      fusedChannel);
-                            }
-                            break;
-                    }
+                switch (c) {
+                    case 1:
+                        if (imageReference.inImage(new_y, new_x)) {
+                            imageFused.template at<float>(y, x, c) = imageReference.valueAt_bilinear(new_y, new_x,
+                                                                                                     fusedChannel);
+                        }
+                        break;
+                    case 0:
+                    case 2:
+                        if (imageMoving.inImage(new_y, new_x)) {
+                            imageFused.template at<float>(y, x, c) = imageMoving.valueAt_bilinear(new_y, new_x,
+                                                                                                  fusedChannel);
+                        }
+                        break;
                 }
             }
         }
@@ -106,8 +105,9 @@ bool endsWithCaseInsensitive(std::string mainStr, std::string toMatch) {
                        });
 }
 
-template <typename pixType, uint8_t CHANNELS>
-void writeTransformedImageToDisk(CudaImage<pixType,CHANNELS> image, nv_ext::Vec<float, 8> H, std::string img_out_filename) {
+template<typename pixType, uint8_t CHANNELS>
+void
+writeTransformedImageToDisk(CudaImage<pixType, CHANNELS> image, nv_ext::Vec<float, 8> H, std::string img_out_filename) {
     CudaImage<uint8_t, CHANNELS> image_out(image.height(), image.width());
     checkCudaErrors(cudaMalloc(&image_out.data(), image_out.bytesSize()));
     checkCudaErrors(cudaMemset(image_out.data(), 0, image_out.bytesSize()));
@@ -129,9 +129,9 @@ void writeTransformedImageToDisk(CudaImage<pixType,CHANNELS> image, nv_ext::Vec<
     checkCudaErrors(cudaFree(image_out.data()));
 }
 
-template <typename pixType, uint8_t CHANNELS>
-void writeAlignedAndFusedImageToDisk(CudaImage<pixType,CHANNELS> image_fix,
-                                     CudaImage<pixType,CHANNELS> image_mov,
+template<typename pixType, uint8_t CHANNELS>
+void writeAlignedAndFusedImageToDisk(CudaImage<pixType, CHANNELS> image_fix,
+                                     CudaImage<pixType, CHANNELS> image_mov,
                                      nv_ext::Vec<float, 8> estimatedH,
                                      nv_ext::Vec<float, 8> trueH,
                                      std::string img_fused_filename) {
