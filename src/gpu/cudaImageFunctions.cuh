@@ -72,14 +72,19 @@ __global__ void fuseAlignedImages(nv_ext::Vec<float, D> estimatedH,
                 float new_w = ((h21 * h32 - h22 * h31) * x + (h12 * h31 - h11 * h32) * y + h11 * h22 - h12 * h21);
                 float new_x = ((h22 - h23 * h32) * x + (h13 * h32 - h12) * y + h12 * h23 - h13 * h22) / new_w;
                 float new_y = ((h23 * h31 - h21) * x + (h11 - h13 * h31) * y + h13 * h21 - h11 * h23) / new_w;
-                if (imageReference.inImage(new_y, new_x)) {
                     switch (c) {
                         case 1:
-                            imageFused.template at<float>(y, x, c) = imageReference.valueAt_bilinear(new_y, new_x, fusedChannel);
+                            if (imageReference.inImage(new_y, new_x)) {
+                                imageFused.template at<float>(y, x, c) = imageReference.valueAt_bilinear(new_y, new_x,
+                                                                                                         fusedChannel);
+                            }
                             break;
                         case 0:
                         case 2:
-                            imageFused.template at<float>(y, x, c) = imageMoving.valueAt_bilinear(new_y, new_x, fusedChannel);
+                            if (imageMoving.inImage(new_y, new_x)) {
+                                imageFused.template at<float>(y, x, c) = imageMoving.valueAt_bilinear(new_y, new_x,
+                                                                                                      fusedChannel);
+                            }
                             break;
                     }
                 }
