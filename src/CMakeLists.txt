@@ -10,7 +10,7 @@ if (MATLAB_FOUND)
     add_definitions(/DUSE_MEX_CMD)
 endif (MATLAB_FOUND)
 
-#add_subdirectory(cpu)
+add_subdirectory(cpu)
 
 if (CUDA_FOUND)
     if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)

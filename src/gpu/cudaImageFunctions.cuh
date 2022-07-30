@@ -1,3 +1,20 @@
+/*
+ * Copyright (C) 2022 Andrew R. Willis
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
 //
 // Created by arwillis on 7/27/22.
 //
@@ -155,6 +172,57 @@ void writeAlignedAndFusedImageToDisk(CudaImage<pixType, CHANNELS> image_fix,
     }
     cudaFreeHost(hostValues_fused);
     checkCudaErrors(cudaFree(image_fused.data()));
+}
+
+template<typename Tp, uint8_t D>
+void parametersToHomography(nv_ext::Vec<Tp, D> &parameters,
+                            float &h11, float &h12, float &h13,
+                            float &h21, float &h22, float &h23,
+                            float &h31, float &h32) {
+    float &theta = parameters[0];
+    float &scaleX = parameters[1];
+    float &scaleY = parameters[2];
+    float &shearXY = parameters[3];
+    float &translateX = parameters[4];
+    float &translateY = parameters[5];
+    float &keystoneX = parameters[6];
+    float &keystoneY = parameters[7];
+    h11 = scaleX * cos(theta);
+    h12 = scaleY * shearXY * cos(theta) - scaleY * sin(theta);
+    h13 = scaleX * translateX;
+    h21 = scaleX * sin(theta);
+    h22 = scaleY * shearXY * sin(theta) + scaleY * cos(theta);
+    h23 = scaleY * translateY;
+    h31 = keystoneX;
+    h32 = keystoneY;
+}
+
+template<typename Tp, uint8_t D>
+void homographyToParameters(float &h11, float &h12, float &h13,
+                            float &h21, float &h22, float &h23,
+                            float &h31, float &h32, nv_ext::Vec<Tp, D> &parameters) {
+    float theta = atan2(h21, h11);
+    float scaleX = sqrt(h11 * h11 + h21 * h21);
+    float shearXY_scaleY = h12 * cos(theta) + h22 * sin(theta);
+    float scaleY;
+    if (abs(sin(theta)) > 1.0e-6) {
+        scaleY = (shearXY_scaleY * cos(theta) - h12) / sin(theta);
+    } else {
+        scaleY = (h22 - shearXY_scaleY * sin(theta)) / cos(theta);
+    }
+    float shearXY = shearXY_scaleY / scaleY;
+    float translateX = h13 / scaleX;
+    float translateY = h23 / scaleY;
+    float &keystoneX = h31;
+    float &keystoneY = h32;
+    parameters[0] = theta;
+    parameters[1] = scaleX;
+    parameters[2] = scaleY;
+    parameters[3] = shearXY;
+    parameters[4] = translateX;
+    parameters[5] = translateY;
+    parameters[6] = keystoneX;
+    parameters[7] = keystoneY;
 }
 
 #endif //CUGRIDSEARCH_CUDAIMAGEFUNCTIONS_CUH
