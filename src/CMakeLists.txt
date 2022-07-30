@@ -10,7 +10,12 @@ if (MATLAB_FOUND)
     add_definitions(/DUSE_MEX_CMD)
 endif (MATLAB_FOUND)
 
-add_subdirectory(cpu)
+find_package(Eigen3 QUIET)
+if (EIGEN_FOUND)
+    add_subdirectory(cpu)
+else()
+    message("Eigen not found CPU code will not be built.")
+endif (EIGEN_FOUND)
 
 if (CUDA_FOUND)
     if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
