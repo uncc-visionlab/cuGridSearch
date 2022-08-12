@@ -40,6 +40,8 @@
 #include "cudaGridSearch.cuh"
 #include "cudaErrorFunctions.cuh"
 #include "cudaErrorFunction_mi.cuh"
+#include "cudaErrorFunctionsStreams.cuh"
+#include "cudaErrorFunction_miStreams.cuh"
 #include "cudaImageFunctions.cuh"
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -51,23 +53,23 @@
 #define PI 3.14159265
 
 #define grid_dimension 8        // the dimension of the grid, e.g., 1 => 1D grid, 2 => 2D grid, 3=> 3D grid, etc.
-#define CHANNELS 3
+#define CHANNELS 1
 typedef float grid_precision;   // the type of values in the grid, e.g., float, double, int, etc.
 typedef float func_precision;   // the type of values taken by the error function, e.g., float, double, int, etc.
 typedef uint8_t pixel_precision; // the type of values in the image, e.g., float, double, int, etc.
 
-typedef func_byvalue_t<func_precision, grid_precision, grid_dimension,
-        CudaImage<pixel_precision, CHANNELS>, CudaImage<pixel_precision, CHANNELS> > image_err_func_byvalue;
+// typedef func_byvalue_t<func_precision, grid_precision, grid_dimension,
+//         CudaImage<pixel_precision, CHANNELS>, CudaImage<pixel_precision, CHANNELS> > image_err_func_byvalue;
 
 // create device function pointer for by-value kernel function here
-__device__ image_err_func_byvalue dev_func_byvalue_ptr = averageAbsoluteDifference<func_precision, grid_precision, grid_dimension, CHANNELS, pixel_precision>;
+// __device__ image_err_func_byvalue dev_func_byvalue_ptr = averageAbsoluteDifference<func_precision, grid_precision, grid_dimension, CHANNELS, pixel_precision>;
 //__device__ image_err_func_byvalue dev_func_byvalue_ptr = sumOfAbsoluteDifferences<func_precision, grid_precision, grid_dimension, pixel_precision>;
 
-// grid_mi
-//typedef func_byvalue_t<func_precision, grid_precision, grid_dimension,
-//        CudaImage<pixel_precision, CHANNELS>, CudaImage<pixel_precision, CHANNELS> > image_err_func_byvalue;
-//__device__ image_err_func_byvalue dev_func_byvalue_ptr = grid_mi<func_precision, grid_precision,
-//        grid_dimension, CHANNELS, pixel_precision>;
+// SQD/NCC/MI
+typedef func_byvalue_t<func_precision, grid_precision, grid_dimension,
+       CudaImage<pixel_precision, CHANNELS>, CudaImage<pixel_precision, CHANNELS> > image_err_func_byvalue;
+__device__ image_err_func_byvalue dev_func_byvalue_ptr = calcNCCstream<func_precision, grid_precision,
+       grid_dimension, CHANNELS, pixel_precision>;
 
 #define cudaCheckErrors(msg) \
     do { \
@@ -109,8 +111,8 @@ void printMatrix(double **matrix, int ROWS, int COLUMNS) {
 // stored are the transpose of that shown in initialization below
 pixel_precision imageA_data[6 * 6] = {0, 0, 0, 0, 0, 0,
                                       0, 0, 0, 0, 0, 0,
-                                      0, 0, 1, 1, 0, 0,
-                                      0, 0, 1, 1, 0, 0,
+                                      0, 0, 255, 255, 0, 0,
+                                      0, 0, 255, 255, 0, 0,
                                       0, 0, 0, 0, 0, 0,
                                       0, 0, 0, 0, 0, 0};
 
@@ -181,7 +183,7 @@ int main(int argc, char **argv) {
     }
 
     // number of components must be equal on construction
-    assert(nf == CHANNELS && nm == CHANNELS);
+    // assert(nf == CHANNELS && nm == CHANNELS); // Does not work if using gray scale, nf/nm are based on original channels
 
     CudaImage<uint8_t, CHANNELS> image_fix(yf, xf);
     CudaImage<uint8_t, CHANNELS> image_mov(ym, xm);
@@ -235,8 +237,8 @@ int main(int argc, char **argv) {
                                              (grid_precision) 0,
                                              (grid_precision) 0};
     std::vector<grid_precision> num_samples = {(grid_precision) 11,
-                                               (grid_precision) 1,
-                                               (grid_precision) 1,
+                                               (grid_precision) 2,
+                                               (grid_precision) 2,
                                                (grid_precision) 11,
                                                (grid_precision) (xf + 1) / 10,
                                                (grid_precision) (yf + 1) / 10,
@@ -269,8 +271,9 @@ int main(int argc, char **argv) {
                          sizeof(image_err_func_byvalue));
 
     //translation_xy_gridsearcher.search(host_func_byval_ptr, m1, m2);
-    translation_xy_gridsearcher.search_by_value(host_func_byval_ptr, image_mov, image_fix);
-    //translation_xy_gridsearcher.search_by_value_stream(host_func_byval_ptr, 10000, 1, image_mov, image_fix);
+    // translation_xy_gridsearcher.search_by_value(host_func_byval_ptr, image_mov, image_fix);
+    // translation_xy_gridsearcher.search_by_value_stream(host_func_byval_ptr, 10000, 1, image_mov, image_fix);
+    translation_xy_gridsearcher.search_by_value_stream(host_func_byval_ptr, 10000, image_fix.height(), image_mov, image_fix);
 
 //    func_values.display();
 
@@ -285,22 +288,24 @@ int main(int argc, char **argv) {
         std::cout << min_grid_point[d] << ((d < grid_dimension - 1) ? ", " : " ");
     }
     std::cout << "}" << std::endl;
-    float &mtheta = min_grid_point[0];
-    float &mscaleX = min_grid_point[1];
-    float &mscaleY = min_grid_point[2];
-    float &mshearXY = min_grid_point[3];
-    float &mtranslateX = min_grid_point[4];
-    float &mtranslateY = min_grid_point[5];
-    float &mkeystoneX = min_grid_point[6];
-    float &mkeystoneY = min_grid_point[7];
 
-    float minH[] = {mscaleX * cos(mtheta),
-                    mscaleY * mshearXY * cos(mtheta) - mscaleY * sin(mtheta),
-                    mscaleX * mtranslateX,
-                    mscaleX * sin(mtheta),
-                    mscaleY * mshearXY * sin(mtheta) + mscaleY * cos(mtheta),
-                    mscaleY * mtranslateY,
-                    mkeystoneX, mkeystoneY};
+    float minParams[] = {min_grid_point[0],
+                         min_grid_point[1],
+                         min_grid_point[2],
+                         min_grid_point[3],
+                         min_grid_point[4],
+                         min_grid_point[5],
+                         min_grid_point[6], 
+                         min_grid_point[7]};
+    float h11 = 0, h12 = 0, h13 = 0, h21 = 0, h22 = 0, h23 = 0, h31 = 0, h32 = 0, cx = (float)xm/2, cy = (float)ym/2;
+    nv_ext::Vec<float, 8> minParamsVec(minParams);
+    parametersToHomography<grid_precision,8>(minParamsVec, cx, cy,
+        h11, h12, h13,
+        h21, h22, h23,
+        h31, h32);
+    float minH[] = {h11, h12, h13,
+                    h21, h22, h23,
+                    h31, h32};
 //    nv_ext::Vec<float, 8> H(initialH);
     nv_ext::Vec<float, 8> H(minH);
 

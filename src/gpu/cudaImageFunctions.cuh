@@ -35,6 +35,8 @@
 
 #include "cudaTensor.cuh"
 
+#define CUDAFUNCTION __host__ __device__
+
 template<typename pixType, uint8_t D, uint8_t CHANNELS>
 __global__ void transformImage(nv_ext::Vec<float, D> H,
                                CudaImage<pixType, CHANNELS> imageIn,
@@ -153,7 +155,7 @@ void writeAlignedAndFusedImageToDisk(CudaImage<pixType, CHANNELS> image_fix,
                                      nv_ext::Vec<float, 8> estimatedH,
                                      nv_ext::Vec<float, 8> trueH,
                                      std::string img_fused_filename) {
-    CudaImage<uint8_t, 3> image_fused(image_mov.height(), image_mov.width());
+    CudaImage<uint8_t, 3> image_fused(image_fix.height(), image_fix.width());
     checkCudaErrors(cudaMalloc(&image_fused.data(), image_fused.bytesSize()));
     checkCudaErrors(cudaMemset(image_fused.data(), 0, image_fused.bytesSize()));
     fuseAlignedImages<uint8_t, 8, CHANNELS><<<1, 1>>>(estimatedH, trueH, image_fix, image_mov, image_fused, 0);
@@ -175,7 +177,8 @@ void writeAlignedAndFusedImageToDisk(CudaImage<pixType, CHANNELS> image_fix,
 }
 
 template<typename Tp, uint8_t D>
-void parametersToHomography(nv_ext::Vec<Tp, D> &parameters,
+CUDAFUNCTION void parametersToHomography(nv_ext::Vec<Tp, D> &parameters,
+                            float &cx, float& cy,
                             float &h11, float &h12, float &h13,
                             float &h21, float &h22, float &h23,
                             float &h31, float &h32) {
@@ -187,14 +190,48 @@ void parametersToHomography(nv_ext::Vec<Tp, D> &parameters,
     float &translateY = parameters[5];
     float &keystoneX = parameters[6];
     float &keystoneY = parameters[7];
-    h11 = scaleX * cos(theta);
-    h12 = scaleY * shearXY * cos(theta) - scaleY * sin(theta);
-    h13 = scaleX * translateX;
-    h21 = scaleX * sin(theta);
-    h22 = scaleY * shearXY * sin(theta) + scaleY * cos(theta);
-    h23 = scaleY * translateY;
-    h31 = keystoneX;
-    h32 = keystoneY;
+
+    // Changed to one that calculates based off of center of moving image and follows the decomposition of C * K * T * R * Sh * Sc * C
+    // This version closely resembles those of previous obtained homographies.
+
+    h11 = scaleX*(cos(theta)*(cx*keystoneX + 1) + cx*keystoneY*sin(theta));
+    h12 = scaleY*(shearXY*(cos(theta)*(cx*keystoneX + 1) + cx*keystoneY*sin(theta)) - sin(theta)*(cx*keystoneX + 1) + cx*keystoneY*cos(theta));
+    h13 = cx + translateX*(cx*keystoneX + 1) - cx*scaleX*(cos(theta)*(cx*keystoneX + 1) + cx*keystoneY*sin(theta)) - cy*scaleY*(shearXY*(cos(theta)*(cx*keystoneX + 1) + cx*keystoneY*sin(theta)) - sin(theta)*(cx*keystoneX + 1) + cx*keystoneY*cos(theta)) + cx*keystoneY*translateY;
+    h21 = scaleX*(sin(theta)*(cy*keystoneY + 1) + cy*keystoneX*cos(theta));
+    h22 = scaleY*(shearXY*(sin(theta)*(cy*keystoneY + 1) + cy*keystoneX*cos(theta)) + cos(theta)*(cy*keystoneY + 1) - cy*keystoneX*sin(theta));
+    h23 = cy + translateY*(cy*keystoneY + 1) - cx*scaleX*(sin(theta)*(cy*keystoneY + 1) + cy*keystoneX*cos(theta)) - cy*scaleY*(shearXY*(sin(theta)*(cy*keystoneY + 1) + cy*keystoneX*cos(theta)) + cos(theta)*(cy*keystoneY + 1) - cy*keystoneX*sin(theta)) + cy*keystoneX*translateX;
+    h31 = scaleX*(keystoneX*cos(theta) + keystoneY*sin(theta));
+    h32 = scaleY*(shearXY*(keystoneX*cos(theta) + keystoneY*sin(theta)) + keystoneY*cos(theta) - keystoneX*sin(theta));
+    float h33 = keystoneX*translateX + keystoneY*translateY - cy*scaleY*(shearXY*(keystoneX*cos(theta) + keystoneY*sin(theta)) + keystoneY*cos(theta) - keystoneX*sin(theta)) - cx*scaleX*(keystoneX*cos(theta) + keystoneY*sin(theta)) + 1;
+    
+    h11 /= h33;
+    h12 /= h33;
+    h13 /= h33;
+    h21 /= h33;
+    h22 /= h33;
+    h23 /= h33;
+    h31 /= h33;
+    h32 /= h33;
+
+
+    // h11 = scaleX * cos(theta);
+    // h12 = scaleY * shearXY * cos(theta) - scaleY * sin(theta);
+    // h13 = scaleX * translateX;
+    // h21 = scaleX * sin(theta);
+    // h22 = scaleY * shearXY * sin(theta) + scaleY * cos(theta);
+    // h23 = scaleY * translateY;
+    // h31 = keystoneX;
+    // h32 = keystoneY;
+}
+
+CUDAFUNCTION void calcNewCoordH(float &h11, float &h12, float &h13,
+                   float &h21, float &h22, float &h23,
+                   float &h31, float &h32,
+                   int &x, int &y,
+                   float &new_x, float &new_y) {
+    float new_w = ((h21 * h32 - h22 * h31) * x + (h12 * h31 - h11 * h32) * y + h11 * h22 - h12 * h21);
+    new_x = ((h22 - h23 * h32) * x + (h13 * h32 - h12) * y + h12 * h23 - h13 * h22) / new_w;
+    new_y = ((h23 * h31 - h21) * x + (h11 - h13 * h31) * y + h13 * h21 - h11 * h23) / new_w;
 }
 
 template<typename Tp, uint8_t D>
