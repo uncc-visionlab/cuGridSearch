@@ -39,9 +39,9 @@
 
 #include "cudaGridSearch.cuh"
 #include "cudaErrorFunctions.cuh"
+#include "cudaErrorFunction_mi.cuh"
 #include "cudaErrorFunctionsStreams.cuh"
 #include "cudaErrorFunction_miStreams.cuh"
-#include "cudaErrorFunction_mi.cuh"
 #include "cudaImageFunctions.cuh"
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -51,33 +51,27 @@
 #include "stb_image.h"
 
 #define PI 3.14159265
-#define grid_dimension 4        // the dimension of the grid, e.g., 1 => 1D grid, 2 => 2D grid, 3=> 3D grid, etc.
+
+#define grid_dimension 8        // the dimension of the grid, e.g., 1 => 1D grid, 2 => 2D grid, 3=> 3D grid, etc.
 #define CHANNELS 1
-#define DEPTH 1
 typedef float grid_precision;   // the type of values in the grid, e.g., float, double, int, etc.
 typedef float func_precision;   // the type of values taken by the error function, e.g., float, double, int, etc.
 typedef uint8_t pixel_precision; // the type of values in the image, e.g., float, double, int, etc.
 
-// typedef func_byvalue_t<func_precision, grid_precision, grid_dimension, CudaImage<pixel_precision>, CudaImage<pixel_precision> > image_err_func_byvalue;
+#define DEPTH 3
 
-// create device function pointer for by-value kernel function here
-// __device__ image_err_func_byvalue dev_func_byvalue_ptr = averageAbsoluteDifference<func_precision, grid_precision, grid_dimension, pixel_precision>;
-//__device__ image_err_func_byvalue dev_func_byvalue_ptr = sumOfAbsoluteDifferences<func_precision, grid_precision, grid_dimension, pixel_precision>;
-
-// grid_mi
 // typedef func_byvalue_t<func_precision, grid_precision, grid_dimension,
 //         CudaImage<pixel_precision, CHANNELS>, CudaImage<pixel_precision, CHANNELS> > image_err_func_byvalue;
 
-// calcMIstream
-typedef func_byvalue_t<func_precision, grid_precision, grid_dimension,
-        CudaImage<pixel_precision, CHANNELS>, CudaImage<pixel_precision, CHANNELS>, CudaImage<float, 1>, CudaImage<float, 1>, CudaImage<float, 1> > image_err_func_byvalue;
+// create device function pointer for by-value kernel function here
+// __device__ image_err_func_byvalue dev_func_byvalue_ptr = averageAbsoluteDifference<func_precision, grid_precision, grid_dimension, CHANNELS, pixel_precision>;
+//__device__ image_err_func_byvalue dev_func_byvalue_ptr = sumOfAbsoluteDifferences<func_precision, grid_precision, grid_dimension, pixel_precision>;
 
-// __device__ image_err_func_byvalue dev_func_byvalue_ptr = grid_miStream<func_precision, grid_precision,
-//         grid_dimension, CHANNELS, pixel_precision>;
-__device__ image_err_func_byvalue dev_func_byvalue_ptr = calcMIstream<func_precision, grid_precision,
-        grid_dimension, CHANNELS, pixel_precision>;
-//__device__ image_err_func_byvalue dev_func_byvalue_ptr = calcMI<func_precision, grid_precision,
-//        grid_dimension, CHANNELS, pixel_precision>;
+// SQD/NCC/MI
+typedef func_byvalue_t<func_precision, grid_precision, grid_dimension,
+       CudaImage<pixel_precision, CHANNELS>, CudaImage<pixel_precision, CHANNELS> > image_err_func_byvalue;
+__device__ image_err_func_byvalue dev_func_byvalue_ptr = calcSQD<func_precision, grid_precision,
+       grid_dimension, CHANNELS, pixel_precision>;
 
 #define cudaCheckErrors(msg) \
     do { \
@@ -119,8 +113,8 @@ void printMatrix(double **matrix, int ROWS, int COLUMNS) {
 // stored are the transpose of that shown in initialization below
 pixel_precision imageA_data[6 * 6] = {0, 0, 0, 0, 0, 0,
                                       0, 0, 0, 0, 0, 0,
-                                      0, 0, 1, 1, 0, 0,
-                                      0, 0, 1, 1, 0, 0,
+                                      0, 0, 255, 255, 0, 0,
+                                      0, 0, 255, 255, 0, 0,
                                       0, 0, 0, 0, 0, 0,
                                       0, 0, 0, 0, 0, 0};
 
@@ -191,30 +185,10 @@ int main(int argc, char **argv) {
     }
 
     // number of components must be equal on construction
-    printf("%d %d\n", nf, nm);
-    //assert(nf == CHANNELS && nm == CHANNELS);
+    // assert(nf == CHANNELS && nm == CHANNELS); // Does not work if using gray scale, nf/nm are based on original channels
 
     CudaImage<uint8_t, CHANNELS> image_fix(yf, xf);
     CudaImage<uint8_t, CHANNELS> image_mov(ym, xm);
-
-    int binN = 64;
-    float h_px[binN] = {0};
-    CudaImage<float, 1> d_px(binN, 1);
-    CudaImage<float, 1> d_py(binN, 1);
-    CudaImage<float, 1> d_pxy(binN, binN);
-
-    for (int i = 0; i < yf * xf; i++) {
-        int temp = dataf[i] / (256 / binN);
-        h_px[temp] += (1.0f / (yf * xf));
-    }
-
-    checkCudaErrors(cudaMalloc(&d_px.data(), d_px.bytesSize()));
-    checkCudaErrors(cudaMalloc(&d_py.data(), d_py.bytesSize()));
-    checkCudaErrors(cudaMalloc(&d_pxy.data(), d_pxy.bytesSize()));
-
-    checkCudaErrors(cudaMemcpy(d_px.data(), h_px, d_px.bytesSize(), cudaMemcpyHostToDevice));
-    checkCudaErrors(cudaMemset(d_py.data(), 0, d_py.bytesSize()));
-    checkCudaErrors(cudaMemset(d_pxy.data(), 0, d_pxy.bytesSize()));
 
     checkCudaErrors(cudaMalloc(&image_fix.data(), image_fix.bytesSize()));
     checkCudaErrors(cudaMemcpy(image_fix.data(), dataf, image_fix.bytesSize(), cudaMemcpyHostToDevice));
@@ -225,84 +199,7 @@ int main(int argc, char **argv) {
     stbi_image_free(dataf);
     stbi_image_free(datam);
 
-    checkCudaErrors(cudaDeviceSetLimit(cudaLimitMallocHeapSize, (size_t) (1 << 30)));
-
-    // Example
-    // Fixed 581x593
-    // Moving 100x100
-    // Total samples 276,342,848
-    // std::vector<grid_precision> start_point = {(grid_precision) 100, (grid_precision) 200, (grid_precision) 0, (grid_precision) 1};
-    // std::vector<grid_precision> end_point =   {(grid_precision) 300, (grid_precision) 400, (grid_precision) (2*PI)-(PI/180), (grid_precision) 5};
-    // std::vector<grid_precision> num_samples =  {(grid_precision) 201, (grid_precision) 201, (grid_precision) 360, (grid_precision) 9};
-
-    // // Example MI
-    std::vector<grid_precision> start_point = {(grid_precision) -xm / 2, (grid_precision) -ym / 2, (grid_precision) 0,
-                                               (grid_precision) 1};
-    std::vector<grid_precision> end_point = {(grid_precision) xf - xm / 2, (grid_precision) yf - ym / 2,
-                                             (grid_precision) 0, (grid_precision) 1};
-    std::vector<grid_precision> num_samples = {(grid_precision) (xf + 1) / 14, (grid_precision) (yf + 1) / 14,
-                                               (grid_precision) 1,
-                                               (grid_precision) 1};
-
-    CudaGrid<grid_precision, grid_dimension> affineTransform_grid;
-    checkCudaErrors(cudaMalloc(&affineTransform_grid.data(), affineTransform_grid.bytesSize()));
-
-    for (int iii = 0; iii < DEPTH; iii++) {
-        affineTransform_grid.setStartPoint(start_point);
-        affineTransform_grid.setEndPoint(end_point);
-        affineTransform_grid.setNumSamples(num_samples);
-        affineTransform_grid.display("affineTransform_grid");
-
-        grid_precision axis_sample_counts[grid_dimension];
-        affineTransform_grid.getAxisSampleCounts(axis_sample_counts);
-
-        CudaTensor<func_precision, grid_dimension> func_values(axis_sample_counts);
-        checkCudaErrors(cudaMalloc(&func_values.data(), func_values.bytesSize()));
-        //func_values.fill(0);
-
-        // first template argument is the error function return type
-        // second template argument is the grid point value type
-        CudaGridSearcher<func_precision, grid_precision, grid_dimension> affineTransform_gridsearcher(
-                affineTransform_grid,
-                func_values);
-
-        // Mutual Information
-        // Copy device function pointer for the function having by-value parameters to host side
-        cudaMemcpyFromSymbol(&host_func_byval_ptr, dev_func_byvalue_ptr,
-                             sizeof(image_err_func_byvalue));
-
-        //affineTransform_gridsearcher.search(host_func_byval_ptr, m1, m2);
-        // affineTransform_gridsearcher.search_by_value(host_func_byval_ptr, m1, m2);
-        affineTransform_gridsearcher.search_by_value_stream(host_func_byval_ptr, 10000, image_mov.height(), image_mov,
-                                                            image_fix, d_px, d_py, d_pxy);
-        // affineTransform_gridsearcher.search_by_value_stream(host_func_byval_ptr, 10000, 1, image_mov, image_fix);
-//        affineTransform_gridsearcher.search_by_value(host_func_byval_ptr, image_mov, image_fix, d_px, d_py, d_pxy);
-
-        //    func_values.display();
-
-        func_precision min_value;
-        int32_t min_value_index1d;
-        func_values.find_extrema(min_value, min_value_index1d);
-
-        grid_precision min_grid_point[grid_dimension];
-        affineTransform_grid.getGridPoint(min_grid_point, min_value_index1d);
-        std::cout << "Minimum found at point p = { ";
-        for (int d = 0; d < grid_dimension; d++) {
-            std::cout << min_grid_point[d] << ((d < grid_dimension - 1) ? ", " : " ");
-            if (num_samples[d] / 2 > 2) {
-                start_point[d] = min_grid_point[d] - (end_point[d] - start_point[d]) / 4;
-                end_point[d] = min_grid_point[d] + (end_point[d] - start_point[d]) / 4;
-                num_samples[d] = ceil(num_samples[d] / 2);
-            } else {
-                start_point[d] = min_grid_point[d];
-                end_point[d] = min_grid_point[d];
-                num_samples[d] = 1;
-            }
-        }
-        std::cout << "}" << std::endl;
-
-        checkCudaErrors(cudaFree(func_values.data()));
-    }
+    checkCudaErrors(cudaDeviceSetLimit(cudaLimitMallocHeapSize, 1 << 30));
 
     //    linear interpolation in homography / affine matrix space
     //    https://math.stackexchange.com/questions/612006/decomposing-an-affine-transformation
@@ -318,10 +215,103 @@ int main(int argc, char **argv) {
     // Transform does scale, shear, rotate, then translate and finally perspective project per the website
     // https://math.stackexchange.com/questions/612006/decomposing-an-affine-transformation
     //float initialH[] = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0};
+
     float initialH[] = {scaleX * cos(theta), scaleY * shearXY * cos(theta) - scaleY * sin(theta), scaleX * translateX,
                         scaleX * sin(theta), scaleY * shearXY * sin(theta) + scaleY * cos(theta), scaleY * translateY,
                         keystoneX, keystoneY};
-    nv_ext::Vec<float, 8> H(initialH);
+
+    // Example MI
+    std::vector<grid_precision> start_point = {(grid_precision) -PI / 20, // theta
+                                               (grid_precision) 1, // scaleX
+                                               (grid_precision) 1, // scaleY
+                                               (grid_precision) -0.4,  // shearXY
+                                               (grid_precision) -xm / 2,  // translateX
+                                               (grid_precision) -ym / 2,  // translateY
+                                               (grid_precision) 0, // keystoneX
+                                               (grid_precision) 0  // keystoneY
+                                              };
+    std::vector<grid_precision> end_point = {(grid_precision) PI / 20,
+                                             (grid_precision) 1.5,
+                                             (grid_precision) 1.5,
+                                             (grid_precision) 0.2,
+                                             (grid_precision) xf - xm / 2,
+                                             (grid_precision) yf - ym / 2,
+                                             (grid_precision) 0,
+                                             (grid_precision) 0};
+    std::vector<grid_precision> num_samples = {(grid_precision) 8,
+                                               (grid_precision) 2,
+                                               (grid_precision) 2,
+                                               (grid_precision) 5,
+                                               (grid_precision) (xf + 1) / 10,
+                                               (grid_precision) (yf + 1) / 10,
+                                               (grid_precision) 1,
+                                               (grid_precision) 1};
+    
+    float minParams[grid_dimension] = {0};
+
+    for (int iii = 0; iii < DEPTH; iii++) {
+        CudaGrid<grid_precision, grid_dimension> translation_xy_grid;
+        checkCudaErrors(cudaMalloc(&translation_xy_grid.data(), translation_xy_grid.bytesSize()));
+
+        translation_xy_grid.setStartPoint(start_point);
+        translation_xy_grid.setEndPoint(end_point);
+        translation_xy_grid.setNumSamples(num_samples);
+        translation_xy_grid.display("translation_xy_grid");
+
+        grid_precision axis_sample_counts[grid_dimension];
+        translation_xy_grid.getAxisSampleCounts(axis_sample_counts);
+
+        CudaTensor<func_precision, grid_dimension> func_values(axis_sample_counts);
+        checkCudaErrors(cudaMalloc(&func_values.data(), func_values.bytesSize()));
+        //func_values.fill(0);
+
+        // first template argument is the error function return type
+        // second template argument is the grid point value type
+        CudaGridSearcher<func_precision, grid_precision, grid_dimension> translation_xy_gridsearcher(translation_xy_grid,
+                                                                                                    func_values);
+
+        // Mutual Information
+        // Copy device function pointer for the function having by-value parameters to host side
+        cudaMemcpyFromSymbol(&host_func_byval_ptr, dev_func_byvalue_ptr,
+                            sizeof(image_err_func_byvalue));
+
+        //translation_xy_gridsearcher.search(host_func_byval_ptr, m1, m2);
+        translation_xy_gridsearcher.search_by_value(host_func_byval_ptr, image_mov, image_fix);
+        // translation_xy_gridsearcher.search_by_value_stream(host_func_byval_ptr, 10000, 1, image_mov, image_fix);
+        // translation_xy_gridsearcher.search_by_value_stream(host_func_byval_ptr, 10000, image_fix.height(), image_mov, image_fix);
+
+    //    func_values.display();
+
+        func_precision min_value;
+        int32_t min_value_index1d;
+        func_values.find_extrema(min_value, min_value_index1d);
+
+        grid_precision min_grid_point[grid_dimension];
+        translation_xy_grid.getGridPoint(min_grid_point, min_value_index1d);
+        std::cout << "Minimum found at point p = { ";
+        for (int d = 0; d < grid_dimension; d++) {
+            std::cout << min_grid_point[d] << ((d < grid_dimension - 1) ? ", " : " ");
+            minParams[d] = min_grid_point[d];
+
+            start_point[d] = min_grid_point[d] - (end_point[d] - start_point[d]) / 4;
+            end_point[d] = min_grid_point[d] + (end_point[d] - start_point[d]) / 4;
+        }
+        std::cout << "}" << std::endl;
+
+        checkCudaErrors(cudaFree(translation_xy_grid.data()));
+        checkCudaErrors(cudaFree(func_values.data()));
+    }
+    float h11 = 0, h12 = 0, h13 = 0, h21 = 0, h22 = 0, h23 = 0, h31 = 0, h32 = 0, cx = (float)xm/2, cy = (float)ym/2;
+    nv_ext::Vec<float, 8> minParamsVec(minParams);
+    parametersToHomography<grid_precision,8>(minParamsVec, cx, cy,
+        h11, h12, h13,
+        h21, h22, h23,
+        h31, h32);
+    float minH[] = {h11, h12, h13,
+                    h21, h22, h23,
+                    h31, h32};
+//    nv_ext::Vec<float, 8> H(initialH);
+    nv_ext::Vec<float, 8> H(minH);
 
     // Write an output image to disk
     writeTransformedImageToDisk<uint8_t, CHANNELS>(image_mov, H, img_out_filename);
@@ -332,9 +322,5 @@ int main(int argc, char **argv) {
     // Clean memory
     checkCudaErrors(cudaFree(image_fix.data()));
     checkCudaErrors(cudaFree(image_mov.data()));
-    checkCudaErrors(cudaFree(affineTransform_grid.data()));
-    checkCudaErrors(cudaFree(d_px.data()));
-    checkCudaErrors(cudaFree(d_py.data()));
-    checkCudaErrors(cudaFree(d_pxy.data()));
     return EXIT_SUCCESS;
 }
