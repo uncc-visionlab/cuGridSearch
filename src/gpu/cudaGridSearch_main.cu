@@ -53,7 +53,7 @@
 #define PI 3.14159265
 
 #define grid_dimension 8        // the dimension of the grid, e.g., 1 => 1D grid, 2 => 2D grid, 3=> 3D grid, etc.
-#define CHANNELS 1
+#define CHANNELS 3
 typedef float grid_precision;   // the type of values in the grid, e.g., float, double, int, etc.
 typedef float func_precision;   // the type of values taken by the error function, e.g., float, double, int, etc.
 typedef uint8_t pixel_precision; // the type of values in the image, e.g., float, double, int, etc.
@@ -68,7 +68,7 @@ typedef uint8_t pixel_precision; // the type of values in the image, e.g., float
 // SQD/NCC/MI
 typedef func_byvalue_t<func_precision, grid_precision, grid_dimension,
        CudaImage<pixel_precision, CHANNELS>, CudaImage<pixel_precision, CHANNELS> > image_err_func_byvalue;
-__device__ image_err_func_byvalue dev_func_byvalue_ptr = calcNCCstream<func_precision, grid_precision,
+__device__ image_err_func_byvalue dev_func_byvalue_ptr = calcSQDstream<func_precision, grid_precision,
        grid_dimension, CHANNELS, pixel_precision>;
 
 #define cudaCheckErrors(msg) \
@@ -310,7 +310,7 @@ int main(int argc, char **argv) {
     nv_ext::Vec<float, 8> H(minH);
 
     // Write an output image to disk
-    writeTransformedImageToDisk<uint8_t, CHANNELS>(image_mov, H, img_out_filename);
+    writeTransformedImageToDisk<uint8_t, CHANNELS>(image_mov, yf, xf, H, img_out_filename);
 
     // Write aligned and fused output image to disk
     writeAlignedAndFusedImageToDisk<uint8_t, CHANNELS>(image_fix, image_mov, H, H, img_fused_filename);
