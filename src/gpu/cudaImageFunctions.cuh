@@ -38,11 +38,12 @@
 #define CUDAFUNCTION __host__ __device__
 
 template<typename pixType, uint8_t D, uint8_t CHANNELS>
-__global__ void transformImage(nv_ext::Vec<float, D> H,
+__global__ void transformImage(nv_ext::Vec<float, D> H, int rowsm, int colsm,
                                CudaImage<pixType, CHANNELS> imageIn,
                                CudaImage<pixType, CHANNELS> imageOut) {
-    int colsm = imageOut.width();
-    int rowsm = imageOut.height();
+    // int colsm = imageOut.width();
+    // int rowsm = imageOut.height();
+
     // Transform the image
     float &h11 = H[0], &h12 = H[1], &h13 = H[2], &h21 = H[3], &h22 = H[4], &h23 = H[5], &h31 = H[6], &h32 = H[7];
     for (int x = 0; x < colsm; x++) {
@@ -53,7 +54,7 @@ __global__ void transformImage(nv_ext::Vec<float, D> H,
             float new_y = ((h23 * h31 - h21) * x + (h11 - h13 * h31) * y + h13 * h21 - h11 * h23) / new_w;
             if (imageIn.inImage(new_y, new_x)) {
                 for (int c = 0; c < CHANNELS; c++) {
-                    imageOut.template at<float>(y, x) = imageIn.valueAt_bilinear(new_y, new_x);
+                    imageOut.template at<float>(y, x, c) = imageIn.valueAt_bilinear(new_y, new_x, c);
                 }
             }
         }
@@ -127,11 +128,11 @@ bool endsWithCaseInsensitive(std::string mainStr, std::string toMatch) {
 
 template<typename pixType, uint8_t CHANNELS>
 void
-writeTransformedImageToDisk(CudaImage<pixType, CHANNELS> image, nv_ext::Vec<float, 8> H, std::string img_out_filename) {
-    CudaImage<uint8_t, CHANNELS> image_out(image.height(), image.width());
+writeTransformedImageToDisk(CudaImage<pixType, CHANNELS> image, int rowsf, int colsf, nv_ext::Vec<float, 8> H, std::string img_out_filename) {
+    CudaImage<uint8_t, CHANNELS> image_out(rowsf, colsf);
     checkCudaErrors(cudaMalloc(&image_out.data(), image_out.bytesSize()));
     checkCudaErrors(cudaMemset(image_out.data(), 0, image_out.bytesSize()));
-    transformImage<uint8_t, 8, CHANNELS><<<1, 1>>>(H, image, image_out);
+    transformImage<uint8_t, 8, CHANNELS><<<1, 1>>>(H, rowsf, colsf, image, image_out);
 
     uint8_t *hostValues;
     checkCudaErrors(cudaMallocHost(&hostValues, image_out.bytesSize()));
@@ -224,7 +225,7 @@ CUDAFUNCTION void parametersToHomography(nv_ext::Vec<Tp, D> &parameters,
     // h32 = keystoneY;
 }
 
-CUDAFUNCTION void calcNewCoordH(float &h11, float &h12, float &h13,
+CUDAFUNCTION inline void calcNewCoordH(float &h11, float &h12, float &h13,
                    float &h21, float &h22, float &h23,
                    float &h31, float &h32,
                    int &x, int &y,

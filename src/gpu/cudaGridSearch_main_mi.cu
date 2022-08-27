@@ -16,6 +16,13 @@
  */
 
 /* system header */
+
+
+#include <Eigen/Dense>
+
+#include <unsupported/Eigen/NonLinearOptimization>
+#include <unsupported/Eigen/NumericalDiff>
+
 #include <cmath>
 #include <iostream>
 #include <math.h>
@@ -53,7 +60,7 @@
 #define PI 3.14159265
 
 #define grid_dimension 8        // the dimension of the grid, e.g., 1 => 1D grid, 2 => 2D grid, 3=> 3D grid, etc.
-#define CHANNELS 1
+#define CHANNELS 3
 typedef float grid_precision;   // the type of values in the grid, e.g., float, double, int, etc.
 typedef float func_precision;   // the type of values taken by the error function, e.g., float, double, int, etc.
 typedef uint8_t pixel_precision; // the type of values in the image, e.g., float, double, int, etc.
@@ -70,7 +77,7 @@ typedef uint8_t pixel_precision; // the type of values in the image, e.g., float
 // SQD/NCC/MI
 typedef func_byvalue_t<func_precision, grid_precision, grid_dimension,
        CudaImage<pixel_precision, CHANNELS>, CudaImage<pixel_precision, CHANNELS> > image_err_func_byvalue;
-__device__ image_err_func_byvalue dev_func_byvalue_ptr = calcSQD<func_precision, grid_precision,
+__device__ image_err_func_byvalue dev_func_byvalue_ptr = calcNCC<func_precision, grid_precision,
        grid_dimension, CHANNELS, pixel_precision>;
 
 #define cudaCheckErrors(msg) \
@@ -107,6 +114,48 @@ void printMatrix(double **matrix, int ROWS, int COLUMNS) {
         std::cout << std::endl;
     }
 }
+
+// Generic functor
+template<typename _Scalar, int NX = Eigen::Dynamic, int NY = Eigen::Dynamic>
+struct Functor
+{
+    typedef _Scalar Scalar;
+    enum {
+        InputsAtCompileTime = NX,
+        ValuesAtCompileTime = NY
+    };
+    typedef Eigen::Matrix<Scalar,InputsAtCompileTime,1> InputType;
+    typedef Eigen::Matrix<Scalar,ValuesAtCompileTime,1> ValueType;
+    typedef Eigen::Matrix<Scalar,ValuesAtCompileTime,InputsAtCompileTime> JacobianType;
+
+    int m_inputs, m_values;
+
+    Functor() : m_inputs(InputsAtCompileTime), m_values(ValuesAtCompileTime) {}
+    Functor(int inputs, int values) : m_inputs(inputs), m_values(values) {}
+
+    int inputs() const { return m_inputs; }
+    int values() const { return m_values; }
+
+};
+
+CudaImage<uint8_t, CHANNELS> *image_fix_test;
+CudaImage<uint8_t, CHANNELS> *image_mov_test;
+struct my_functor : Functor<float>
+{
+    my_functor(void): Functor<float>(grid_dimension,grid_dimension) {}
+    int operator()(const Eigen::VectorXf &x, Eigen::VectorXf &fvec) const
+    {
+        float minParams[grid_dimension] = {0};
+        for (int i = 0; i < grid_dimension; i++)
+            minParams[i] = x(i);
+        nv_ext::Vec<float, grid_dimension> minParamsVec(minParams);
+
+        fvec(0) = (calcNCC<func_precision, grid_precision, grid_dimension, CHANNELS, pixel_precision>(minParamsVec, *image_fix_test, *image_mov_test));
+        for (int i = 1; i < grid_dimension; i++)
+            fvec(i) = 0;
+        return 0;
+    }
+};
 
 // test grid search
 // classes typically store images in column major format so the images
@@ -196,8 +245,14 @@ int main(int argc, char **argv) {
     checkCudaErrors(cudaMalloc(&image_mov.data(), image_mov.bytesSize()));
     checkCudaErrors(cudaMemcpy(image_mov.data(), datam, image_mov.bytesSize(), cudaMemcpyHostToDevice));
 
-    stbi_image_free(dataf);
-    stbi_image_free(datam);
+    CudaImage<uint8_t, CHANNELS> image_fix2(yf, xf);
+    CudaImage<uint8_t, CHANNELS> image_mov2(ym, xm);
+
+    image_fix2.data() = dataf;
+    image_mov2.data() = datam;
+
+    image_fix_test = &image_fix2;
+    image_mov_test = &image_mov2;
 
     checkCudaErrors(cudaDeviceSetLimit(cudaLimitMallocHeapSize, 1 << 30));
 
@@ -221,26 +276,29 @@ int main(int argc, char **argv) {
                         keystoneX, keystoneY};
 
     // Example MI
-    std::vector<grid_precision> start_point = {(grid_precision) -PI / 20, // theta
-                                               (grid_precision) 1, // scaleX
-                                               (grid_precision) 1, // scaleY
+    scaleX = 1;
+    scaleY = 1;
+    std::vector<grid_precision> start_point = {(grid_precision) 0, // theta
+                                               (grid_precision) 3.5, // scaleX
+                                               (grid_precision) 3.5, // scaleY
                                                (grid_precision) -0.4,  // shearXY
-                                               (grid_precision) -xm / 2,  // translateX
-                                               (grid_precision) -ym / 2,  // translateY
+                                               (grid_precision) 0,  // translateX
+                                               (grid_precision) 0,  // translateY
                                                (grid_precision) 0, // keystoneX
                                                (grid_precision) 0  // keystoneY
                                               };
-    std::vector<grid_precision> end_point = {(grid_precision) PI / 20,
-                                             (grid_precision) 1.5,
-                                             (grid_precision) 1.5,
+    std::vector<grid_precision> end_point = {(grid_precision) PI,
+                                             (grid_precision) 5,
+                                             (grid_precision) 5,
                                              (grid_precision) 0.2,
-                                             (grid_precision) xf - xm / 2,
-                                             (grid_precision) yf - ym / 2,
+                                             (grid_precision) xf - xm,
+                                             (grid_precision) yf - ym,
                                              (grid_precision) 0,
                                              (grid_precision) 0};
+                                             
     std::vector<grid_precision> num_samples = {(grid_precision) 8,
-                                               (grid_precision) 2,
-                                               (grid_precision) 2,
+                                               (grid_precision) 5,
+                                               (grid_precision) 5,
                                                (grid_precision) 5,
                                                (grid_precision) (xf + 1) / 10,
                                                (grid_precision) (yf + 1) / 10,
@@ -301,8 +359,31 @@ int main(int argc, char **argv) {
         checkCudaErrors(cudaFree(translation_xy_grid.data()));
         checkCudaErrors(cudaFree(func_values.data()));
     }
+
+    // Non-linear optimizer
+    Eigen::VectorXf x(grid_dimension);
+    for(int i = 0; i < grid_dimension; i++)
+        x(i) = minParams[i];
+    std::cout << "x: " << x << std::endl;
+
+    my_functor functor;
+    Eigen::NumericalDiff<my_functor> numDiff(functor);
+    Eigen::LevenbergMarquardt<Eigen::NumericalDiff<my_functor>,float> lm(numDiff);
+    lm.parameters.maxfev = 2000;
+    lm.parameters.xtol = 1.0e-10;
+
+    int ret = lm.minimize(x);
+    std::cout << "Iterations: " << lm.iter << ", Return code: " << ret << std::endl;
+
+    std::cout << "x that minimizes the function: " << x << std::endl;
+
+    // Convert min Values to H
+    // for(int i = 0; i < grid_dimension; i++)
+    //     minParams[i] = x(i);
+
     float h11 = 0, h12 = 0, h13 = 0, h21 = 0, h22 = 0, h23 = 0, h31 = 0, h32 = 0, cx = (float)xm/2, cy = (float)ym/2;
     nv_ext::Vec<float, 8> minParamsVec(minParams);
+    std::cout << "Min Value check: " << calcNCC<func_precision, grid_precision, grid_dimension, CHANNELS, pixel_precision>(minParamsVec, *image_fix_test, *image_mov_test) << std::endl;
     parametersToHomography<grid_precision,8>(minParamsVec, cx, cy,
         h11, h12, h13,
         h21, h22, h23,
@@ -314,7 +395,7 @@ int main(int argc, char **argv) {
     nv_ext::Vec<float, 8> H(minH);
 
     // Write an output image to disk
-    writeTransformedImageToDisk<uint8_t, CHANNELS>(image_mov, H, img_out_filename);
+    writeTransformedImageToDisk<uint8_t, CHANNELS>(image_mov, yf, xf, H, img_out_filename);
 
     // Write aligned and fused output image to disk
     writeAlignedAndFusedImageToDisk<uint8_t, CHANNELS>(image_fix, image_mov, H, H, img_fused_filename);
@@ -322,5 +403,9 @@ int main(int argc, char **argv) {
     // Clean memory
     checkCudaErrors(cudaFree(image_fix.data()));
     checkCudaErrors(cudaFree(image_mov.data()));
+    
+    
+    stbi_image_free(dataf);
+    stbi_image_free(datam);
     return EXIT_SUCCESS;
 }

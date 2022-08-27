@@ -277,7 +277,10 @@ CUDAFUNCTION func_precision calcSQD(nv_ext::Vec<grid_precision, D> &parameters,
         }
     }
 
-    return output / sqrt(i1 * i2);
+    if(num_errors > 0)
+        return (func_precision) output / sqrt(i1 * i2);
+    else
+        return (func_precision) 123123.0f;
 }
 
 template<typename func_precision, typename grid_precision, uint32_t D, uint32_t CHANNELS, typename pixType>
@@ -335,7 +338,10 @@ CUDAFUNCTION func_precision calcNCC(nv_ext::Vec<grid_precision, D> &parameters,
         }
     }
 
-    return (func_precision) (-1 * ic / sqrt(i1 * i2));
+    if(num_errors > 0)
+        return (func_precision) (-1 * ic / sqrt(i1 * i2));
+    else
+        return (func_precision) 0;
 }
 
 #endif //CUDAERRORFUNCTIONS_CUH
