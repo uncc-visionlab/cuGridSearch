@@ -361,6 +361,82 @@ CUDAFUNCTION func_precision calcSQDAlt(nv_ext::Vec<grid_precision, D> &parameter
 }
 
 template<typename func_precision, typename grid_precision, uint32_t D, uint32_t CHANNELS, typename pixType>
+CUDAFUNCTION func_precision calcNCCAlt(nv_ext::Vec<grid_precision, D> &parameters,
+                                    CudaImage<pixType, CHANNELS> img_moved, CudaImage<pixType, CHANNELS> img_fixed) {
+    func_precision output = 0;
+
+    int colsf = img_fixed.width();
+    int rowsf = img_fixed.height();
+    int colsm = img_moved.width();
+    int rowsm = img_moved.height();
+
+    // if (parameters.size() != 8) {
+    //     printf("Error calcSQD() requires an 8-parameter homography and %d parameters given! Exiting.\n",
+    //            parameters.size());
+    //     return 0;
+    // }
+
+    float h11 = 0, h12 = 0, h13 = 0, h21 = 0, h22 = 0, h23 = 0, h31 = 0, h32 = 0, cx = (float)colsm/2, cy = (float)rowsm/2;
+    parametersToHomography<float,D>(parameters, cx, cy,
+        h11, h12, h13,
+        h21, h22, h23,
+        h31, h32);
+    
+    float i1 = 0;
+    float i2 = 0;
+
+    float mov_area = 0;
+    float fix_area = 0;
+
+    for(int row = 0; row < rowsf; row++) {
+        float lambda_start = 0;
+        float lambda_end = colsf;
+        float v_x = 0;
+        float v_y = 0;
+        float p0_x = 0;
+        float p0_y = 0;
+        bool inImage = false;
+
+        parametricAssignValues(h11, h12, h13, h21, h22, h23, h31, h32,
+                            colsm, rowsm, colsf, rowsf, row,
+                            lambda_start, lambda_end, v_x, v_y, p0_x, p0_y, inImage);
+
+        // printf("row = %d\n", row);
+        // printf("lambda_start = %f, lambda_end = %f, v_x = %f, v_y = %f, p_x = %f, p_y = %f\n", lambda_start, lambda_end, v_x, v_y, p0_x, p0_y);
+
+        float mag_norm = sqrt(v_x * v_x + v_y * v_y);
+
+        for (float lambda = lambda_start; lambda < lambda_end && lambda < colsf; lambda += 1) {
+            float new_x = lambda * v_x + p0_x;
+            float new_y = lambda * v_y + p0_y;
+
+            //if (img_moved.inImage(new_y, new_x)) {
+            if (inImage){
+                for(int c = 0; c < CHANNELS; c++) {
+                    float value_m = img_moved.valueAt_bilinear(new_y, new_x, c);
+                    float value_f = img_fixed.valueAt_bilinear(row, lambda, c);
+
+                    value_m /= 255.0f;
+                    value_f /= 255.0f;
+                    output += (value_m) * (value_f);
+                    i1 += value_m * value_m;
+                    i2 += value_f * value_f;
+                }
+
+                mov_area += mag_norm;
+                fix_area += 1;
+            }
+        }
+    }
+    // if(mov_area != 0 || fix_area != 0)
+    //     printf("mov_area_overlap = %f, fix_area_overlap = %f\noutput = %f, i1 = %f, i2 = %f, outNorm = %f\n", mov_area / (colsm * rowsm * parameters[2]), fix_area / (colsf * rowsf), output, i1, i2, output / sqrt(i1 * i2));
+    if(mov_area / (colsm * rowsm * parameters[2]) > 0.25 && fix_area / (colsf * rowsf) > 0.35)
+        return (func_precision) (-1 * output / sqrt(i1 * i2));
+    else
+        return (func_precision) 123123.0f;
+}
+
+template<typename func_precision, typename grid_precision, uint32_t D, uint32_t CHANNELS, typename pixType>
 CUDAFUNCTION func_precision calcSQD(nv_ext::Vec<grid_precision, D> &parameters,
                                     CudaImage<pixType, CHANNELS> img_moved, CudaImage<pixType, CHANNELS> img_fixed) {
 
