@@ -59,13 +59,13 @@
 
 #define PI 3.14159265
 
-#define grid_dimension 8        // the dimension of the grid, e.g., 1 => 1D grid, 2 => 2D grid, 3=> 3D grid, etc.
+#define grid_dimension 6        // the dimension of the grid, e.g., 1 => 1D grid, 2 => 2D grid, 3=> 3D grid, etc.
 #define CHANNELS 3
 typedef float grid_precision;   // the type of values in the grid, e.g., float, double, int, etc.
 typedef float func_precision;   // the type of values taken by the error function, e.g., float, double, int, etc.
 typedef uint8_t pixel_precision; // the type of values in the image, e.g., float, double, int, etc.
 
-#define DEPTH 3
+#define DEPTH 1
 
 // typedef func_byvalue_t<func_precision, grid_precision, grid_dimension,
 //         CudaImage<pixel_precision, CHANNELS>, CudaImage<pixel_precision, CHANNELS> > image_err_func_byvalue;
@@ -77,7 +77,7 @@ typedef uint8_t pixel_precision; // the type of values in the image, e.g., float
 // SQD/NCC/MI
 typedef func_byvalue_t<func_precision, grid_precision, grid_dimension,
        CudaImage<pixel_precision, CHANNELS>, CudaImage<pixel_precision, CHANNELS> > image_err_func_byvalue;
-__device__ image_err_func_byvalue dev_func_byvalue_ptr = calcNCC<func_precision, grid_precision,
+__device__ image_err_func_byvalue dev_func_byvalue_ptr = calcSQDAlt<func_precision, grid_precision,
        grid_dimension, CHANNELS, pixel_precision>;
 
 #define cudaCheckErrors(msg) \
@@ -150,7 +150,7 @@ struct my_functor : Functor<float>
             minParams[i] = x(i);
         nv_ext::Vec<float, grid_dimension> minParamsVec(minParams);
 
-        fvec(0) = (calcNCC<func_precision, grid_precision, grid_dimension, CHANNELS, pixel_precision>(minParamsVec, *image_fix_test, *image_mov_test));
+        fvec(0) = sqrt(calcSQDAlt<func_precision, grid_precision, grid_dimension, CHANNELS, pixel_precision>(minParamsVec, *image_fix_test, *image_mov_test));
         for (int i = 1; i < grid_dimension; i++)
             fvec(i) = 0;
         return 0;
@@ -279,31 +279,33 @@ int main(int argc, char **argv) {
     scaleX = 1;
     scaleY = 1;
     std::vector<grid_precision> start_point = {(grid_precision) 0, // theta
-                                               (grid_precision) 3.5, // scaleX
-                                               (grid_precision) 3.5, // scaleY
+                                               (grid_precision) 1.5, // scaleX
+                                               (grid_precision) 1.5, // scaleY
                                                (grid_precision) -0.4,  // shearXY
-                                               (grid_precision) 0,  // translateX
-                                               (grid_precision) 0,  // translateY
-                                               (grid_precision) 0, // keystoneX
-                                               (grid_precision) 0  // keystoneY
+                                               (grid_precision) -xm / 2,  // translateX
+                                               (grid_precision) -ym / 2  // translateY
+                                            //    (grid_precision) 0, // keystoneX
+                                            //    (grid_precision) 0  // keystoneY
                                               };
     std::vector<grid_precision> end_point = {(grid_precision) PI,
                                              (grid_precision) 5,
                                              (grid_precision) 5,
                                              (grid_precision) 0.2,
-                                             (grid_precision) xf - xm,
-                                             (grid_precision) yf - ym,
-                                             (grid_precision) 0,
-                                             (grid_precision) 0};
+                                             (grid_precision) xf - xm/2,
+                                             (grid_precision) yf - ym/2
+                                            //  (grid_precision) 0,
+                                            //  (grid_precision) 0
+                                            };
                                              
     std::vector<grid_precision> num_samples = {(grid_precision) 8,
-                                               (grid_precision) 5,
-                                               (grid_precision) 5,
+                                               (grid_precision) 8,
+                                               (grid_precision) 8,
                                                (grid_precision) 5,
                                                (grid_precision) (xf + 1) / 10,
-                                               (grid_precision) (yf + 1) / 10,
-                                               (grid_precision) 1,
-                                               (grid_precision) 1};
+                                               (grid_precision) (yf + 1) / 10
+                                            //    (grid_precision) 1,
+                                            //    (grid_precision) 1
+                                            };
     
     float minParams[grid_dimension] = {0};
 
@@ -364,7 +366,7 @@ int main(int argc, char **argv) {
     Eigen::VectorXf x(grid_dimension);
     for(int i = 0; i < grid_dimension; i++)
         x(i) = minParams[i];
-    std::cout << "x: " << x << std::endl;
+    // std::cout << "x: " << x << std::endl;
 
     my_functor functor;
     Eigen::NumericalDiff<my_functor> numDiff(functor);
@@ -372,19 +374,19 @@ int main(int argc, char **argv) {
     lm.parameters.maxfev = 2000;
     lm.parameters.xtol = 1.0e-10;
 
-    int ret = lm.minimize(x);
-    std::cout << "Iterations: " << lm.iter << ", Return code: " << ret << std::endl;
+    // int ret = lm.minimize(x);
+    // std::cout << "Iterations: " << lm.iter << ", Return code: " << ret << std::endl;
 
-    std::cout << "x that minimizes the function: " << x << std::endl;
+    // std::cout << "x that minimizes the function: " << x << std::endl;
 
     // Convert min Values to H
     // for(int i = 0; i < grid_dimension; i++)
     //     minParams[i] = x(i);
 
     float h11 = 0, h12 = 0, h13 = 0, h21 = 0, h22 = 0, h23 = 0, h31 = 0, h32 = 0, cx = (float)xm/2, cy = (float)ym/2;
-    nv_ext::Vec<float, 8> minParamsVec(minParams);
-    std::cout << "Min Value check: " << calcNCC<func_precision, grid_precision, grid_dimension, CHANNELS, pixel_precision>(minParamsVec, *image_fix_test, *image_mov_test) << std::endl;
-    parametersToHomography<grid_precision,8>(minParamsVec, cx, cy,
+    nv_ext::Vec<float, grid_dimension> minParamsVec(minParams);
+    std::cout << "Min Value check: " << calcSQDAlt<func_precision, grid_precision, grid_dimension, CHANNELS, pixel_precision>(minParamsVec, *image_fix_test, *image_mov_test) << std::endl;
+    parametersToHomography<grid_precision,grid_dimension>(minParamsVec, cx, cy,
         h11, h12, h13,
         h21, h22, h23,
         h31, h32);

@@ -223,6 +223,143 @@ averageAbsoluteDifferenceH(nv_ext::Vec<grid_precision, D> &H, CudaImage<pixType>
     return (func_precision) sum_of_absolute_differences / num_errors;
 }
 
+inline CUDAFUNCTION void parametricAssignValues(float &h11, float &h12, float &h13, float &h21, float &h22, float &h23, float &h31, float &h32,
+                            int &m_width, int &m_height, int &f_width, int &f_height, int &row,
+                            float &lambda_start, float &lambda_end, float &v_x, float &v_y, float &p0_x, float &p0_y, bool &inImage) {
+    
+    float D = h11*h22 - h12*h21 - h11*h23*h32 + h12*h23*h31 + h13*h21*h32 - h13*h22*h31;
+    v_x = ((h22 - h32*row)*(D))/((h11*h22 - h12*h21 - h11*h32*row + h12*h31*row)*(h11*h22 - h12*h21 + f_width*h21*h32 - f_width*h22*h31 - h11*h32*row + h12*h31*row));
+    v_y = -((h21 - h31*row)*(D))/((h11*h22 - h12*h21 - h11*h32*row + h12*h31*row)*(h11*h22 - h12*h21 + f_width*h21*h32 - f_width*h22*h31 - h11*h32*row + h12*h31*row));
+
+    p0_x = (h13*h22 - h12*h23 + row*(h12 - h13*h32))/(h12*h21 - h11*h22 + row*(h11*h32 - h12*h31));
+    p0_y = -(h13*h21 - h11*h23 + row*(h11 - h13*h31))/(h12*h21 - h11*h22 + row*(h11*h32 - h12*h31));
+
+    float lambda_top =-((h11*h23 - h13*h21 - h11*row + h13*h31*row)*(h11*h22 - h12*h21 + f_width*h21*h32 - f_width*h22*h31 - h11*h32*row + h12*h31*row))/((h21 - h31*row)*(h11*h22 - h12*h21 - h11*h23*h32 + h12*h23*h31 + h13*h21*h32 - h13*h22*h31));
+    float x_top_ipt =-(h23 - row)/(h21 - h31*row);
+    float lambda_bottom =-((h11*h22 - h12*h21 + f_width*h21*h32 - f_width*h22*h31 - h11*h32*row + h12*h31*row)*(h11*h23 - h13*h21 - h11*row + h11*h22*m_height - h12*h21*m_height + h13*h31*row - h11*h32*m_height*row + h12*h31*m_height*row))/((h21 - h31*row)*(h11*h22 - h12*h21 - h11*h23*h32 + h12*h23*h31 + h13*h21*h32 - h13*h22*h31));
+    float x_bottom_ipt =-(h23 - row + h22*m_height - h32*m_height*row)/(h21 - h31*row);
+    float lambda_left =-((h12*h23 - h13*h22 - h12*row + h13*h32*row)*(h11*h22 - h12*h21 + f_width*h21*h32 - f_width*h22*h31 - h11*h32*row + h12*h31*row))/((h22 - h32*row)*(h11*h22 - h12*h21 - h11*h23*h32 + h12*h23*h31 + h13*h21*h32 - h13*h22*h31));
+    float y_left_ipt =-(h23 - row)/(h22 - h32*row);
+    float lambda_right =-((h11*h22 - h12*h21 + f_width*h21*h32 - f_width*h22*h31 - h11*h32*row + h12*h31*row)*(h12*h23 - h13*h22 - h12*row - h11*h22*m_width + h12*h21*m_width + h13*h32*row + h11*h32*m_width*row - h12*h31*m_width*row))/((h22 - h32*row)*(h11*h22 - h12*h21 - h11*h23*h32 + h12*h23*h31 + h13*h21*h32 - h13*h22*h31));
+    float y_right_ipt =-(h23 - row + h21*m_width - h31*m_width*row)/(h22 - h32*row);
+
+    if (x_top_ipt >= 0 && x_top_ipt < m_width && lambda_top >= 0 && lambda_top < f_width) {
+        if (v_y > 0) {
+            lambda_start = lambda_top;
+            inImage = true;
+        } else {
+            lambda_end = lambda_top;
+            inImage = true;
+        }
+    }
+
+    if (x_bottom_ipt >= 0 && x_bottom_ipt < m_width && lambda_bottom >= 0 && lambda_bottom < f_width) {
+        if (v_y < 0) {
+            lambda_start = lambda_bottom;        
+            inImage = true;
+        } else {
+            lambda_end = lambda_bottom;
+            inImage = true;
+        }
+    }
+
+    if (y_left_ipt >= 0 && y_left_ipt < m_height && lambda_left >= 0 && lambda_left < f_height) {
+        if (v_x > 0) {
+            lambda_start = lambda_left;
+            inImage = true;
+        } else {
+            lambda_end = lambda_left;
+            inImage = true;
+        }
+    }
+
+    if (y_right_ipt >= 0 && y_right_ipt < m_height && lambda_right >= 0 && lambda_right < f_height) {
+        if (v_x < 0) {
+            lambda_start = lambda_right;
+            inImage = true;
+        } else {
+            lambda_end = lambda_right;
+            inImage = true;
+        }
+    }
+}
+
+template<typename func_precision, typename grid_precision, uint32_t D, uint32_t CHANNELS, typename pixType>
+CUDAFUNCTION func_precision calcSQDAlt(nv_ext::Vec<grid_precision, D> &parameters,
+                                    CudaImage<pixType, CHANNELS> img_moved, CudaImage<pixType, CHANNELS> img_fixed) {
+    func_precision output = 0;
+
+    int colsf = img_fixed.width();
+    int rowsf = img_fixed.height();
+    int colsm = img_moved.width();
+    int rowsm = img_moved.height();
+
+    // if (parameters.size() != 8) {
+    //     printf("Error calcSQD() requires an 8-parameter homography and %d parameters given! Exiting.\n",
+    //            parameters.size());
+    //     return 0;
+    // }
+
+    float h11 = 0, h12 = 0, h13 = 0, h21 = 0, h22 = 0, h23 = 0, h31 = 0, h32 = 0, cx = (float)colsm/2, cy = (float)rowsm/2;
+    parametersToHomography<float,D>(parameters, cx, cy,
+        h11, h12, h13,
+        h21, h22, h23,
+        h31, h32);
+    
+    float i1 = 0;
+    float i2 = 0;
+
+    float mov_area = 0;
+    float fix_area = 0;
+
+    for(int row = 0; row < rowsf; row++) {
+        float lambda_start = 0;
+        float lambda_end = colsf;
+        float v_x = 0;
+        float v_y = 0;
+        float p0_x = 0;
+        float p0_y = 0;
+        bool inImage = false;
+
+        parametricAssignValues(h11, h12, h13, h21, h22, h23, h31, h32,
+                            colsm, rowsm, colsf, rowsf, row,
+                            lambda_start, lambda_end, v_x, v_y, p0_x, p0_y, inImage);
+
+        // printf("row = %d\n", row);
+        // printf("lambda_start = %f, lambda_end = %f, v_x = %f, v_y = %f, p_x = %f, p_y = %f\n", lambda_start, lambda_end, v_x, v_y, p0_x, p0_y);
+
+        float mag_norm = sqrt(v_x * v_x + v_y * v_y);
+
+        for (float lambda = lambda_start; lambda < lambda_end && lambda < colsf; lambda += 1) {
+            float new_x = lambda * v_x + p0_x;
+            float new_y = lambda * v_y + p0_y;
+
+            //if (img_moved.inImage(new_y, new_x)) {
+            if (inImage){
+                for(int c = 0; c < CHANNELS; c++) {
+                    float value_m = img_moved.valueAt_bilinear(new_y, new_x, c);
+                    float value_f = img_fixed.valueAt_bilinear(row, lambda, c);
+
+                    value_m /= 255.0f;
+                    value_f /= 255.0f;
+                    output += (value_m - value_f) * (value_m - value_f);
+                    i1 += value_m * value_m;
+                    i2 += value_f * value_f;
+                }
+
+                mov_area += mag_norm;
+                fix_area += 1;
+            }
+        }
+    }
+    // if(mov_area != 0 || fix_area != 0)
+    //     printf("mov_area_overlap = %f, fix_area_overlap = %f\noutput = %f, i1 = %f, i2 = %f, outNorm = %f\n", mov_area / (colsm * rowsm * parameters[2]), fix_area / (colsf * rowsf), output, i1, i2, output / sqrt(i1 * i2));
+    if(mov_area / (colsm * rowsm * parameters[2]) > 0.25 && fix_area / (colsf * rowsf) > 0.35)
+        return (func_precision) output / sqrt(i1 * i2);
+    else
+        return (func_precision) 123123.0f;
+}
+
 template<typename func_precision, typename grid_precision, uint32_t D, uint32_t CHANNELS, typename pixType>
 CUDAFUNCTION func_precision calcSQD(nv_ext::Vec<grid_precision, D> &parameters,
                                     CudaImage<pixType, CHANNELS> img_moved, CudaImage<pixType, CHANNELS> img_fixed) {
@@ -232,14 +369,14 @@ CUDAFUNCTION func_precision calcSQD(nv_ext::Vec<grid_precision, D> &parameters,
     int colsm = img_moved.width();
     int rowsm = img_moved.height();
 
-    if (parameters.size() != 8) {
-        printf("Error calcSQD() requires an 8-parameter homography and %d parameters given! Exiting.\n",
-               parameters.size());
-        return 0;
-    }
+    // if (parameters.size() != 8) {
+    //     printf("Error calcSQD() requires an 8-parameter homography and %d parameters given! Exiting.\n",
+    //            parameters.size());
+    //     return 0;
+    // }
 
     float h11 = 0, h12 = 0, h13 = 0, h21 = 0, h22 = 0, h23 = 0, h31 = 0, h32 = 0, cx = (float)colsm/2, cy = (float)rowsm/2;
-    parametersToHomography<float,8>(parameters, cx, cy,
+    parametersToHomography<float,D>(parameters, cx, cy,
         h11, h12, h13,
         h21, h22, h23,
         h31, h32);
@@ -249,6 +386,16 @@ CUDAFUNCTION func_precision calcSQD(nv_ext::Vec<grid_precision, D> &parameters,
     float i2 = 0;
 
     float num_errors = 0;
+    // 1. Calc 4 Intersection points
+    // 2. Test 4 points to find entrance and exit point
+    //   a. Test vy for top and botttom
+    //   b. Test vx for left and right
+    // 3. Find the fixed image line segment for that row. (Mag[V] * Width_f+(-1?))
+    // 4. for lambda = lambda_start; lambda < lambda_exit && lambda < fixed_w * Mag[V] - lambda_start; lambda += Mag[V]
+    // 5. x' = lambda * vx + px, y' = lambda * vy + py
+    // 6. Do error calc at interpolated point x' y'
+    // -- (Somewhere, outside the loop) Num_error += (lambda - lambda_start) * Mag[V] (in pix) (prob: lambda will be greater than lambda_exit)
+    // -- (in the loop) Num_error += Mag[V] 
     for (int x = 0; x < colsf; x++) {
         for (int y = 0; y < rowsf; y++) {
             float new_x = 0; float new_y = 0;
