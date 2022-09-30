@@ -22,10 +22,10 @@
 #ifndef CUDATENSORKERNELS_CUH
 #define CUDATENSORKERNELS_CUH
 
-#include <stdint.h>
-#include <cuda/std/limits>
+#include "../../../../../usr/lib/gcc/x86_64-linux-gnu/9/include/stdint.h"
+#include "../../../../../usr/local/cuda-11.5/targets/x86_64-linux/include/cuda/std/limits"
 
-#include "../../include/cudaTensor.cuh"
+#include "cudaTensor.cuh"
 
 bool isPow2(unsigned int x) {
     return ((x & (x - 1)) == 0);

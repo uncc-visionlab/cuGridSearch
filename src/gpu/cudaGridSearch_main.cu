@@ -35,7 +35,7 @@
 #include "helper_functions.h"
 #include "helper_cuda.h"
 
-#include "cudaTensor.cuh"
+#include <cudaTensor.cuh>
 
 #include "cudaGridSearch.cuh"
 #include "cudaErrorFunctions.cuh"

@@ -22,7 +22,7 @@
 //#include <cstdlib>
 #include <iostream>
 
-#include "../../include/cudaTensor.cuh"
+#include <cudaTensor.cuh>
 
 #include "cudaGridSearch.cuh"
 #include "cudaErrorFunctions.cuh"

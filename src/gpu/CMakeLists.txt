@@ -22,7 +22,7 @@ include_directories(
 if(BUILD_EXAMPLES)
     add_executable(${PROJECT_NAME}_main
             cudaGridSearch_main.cu
-            cudaErrorFunctions.cuh ../../include/cuGridSearch.h)
+            cudaErrorFunctions.cuh)
     target_compile_options(${PROJECT_NAME}_main PUBLIC --extended-lambda --expt-relaxed-constexpr)
     target_link_libraries(${PROJECT_NAME}_main -no-pie ${CUDA_LIBRARIES} ${CUDA_CUFFT_LIBRARIES})
 
