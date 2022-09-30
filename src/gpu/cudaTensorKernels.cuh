@@ -25,7 +25,7 @@
 #include <stdint.h>
 #include <cuda/std/limits>
 
-#include "cudaTensor.cuh"
+#include "../../include/cudaTensor.cuh"
 
 bool isPow2(unsigned int x) {
     return ((x & (x - 1)) == 0);

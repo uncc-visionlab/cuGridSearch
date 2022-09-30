@@ -21,7 +21,7 @@
 #include <cmath>
 #include <iostream>
 
-#include "cudaTensor.cuh"
+#include "../../include/cudaTensor.cuh"
 
 #include "cudaGridSearch.cuh"
 #include "cudaErrorFunctions.cuh"

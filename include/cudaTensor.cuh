@@ -590,7 +590,7 @@ struct CudaVector : public CudaMatrix<precision> {
 
 };
 
-#include "cudaTensorKernels.cuh"
+#include "../src/gpu/cudaTensorKernels.cuh"
 
 #endif /* CUDATENSOR_CUH */
 
