@@ -28,6 +28,7 @@ endif()
 
 # Build example executables
 option(BUILD_EXAMPLES "Build library examples." ON)
+
 if (BUILD_EXAMPLES)
     message("STATUS cuGridSearch::Build library examples = YES")
 else()
@@ -39,6 +40,9 @@ include_directories(
         include/third_party
 )
 
-add_subdirectory(third_party)
-
 add_subdirectory(src)
+
+if (BUILD_EXAMPLES)
+else()
+    add_subdirectory(third_party)
+endif()
