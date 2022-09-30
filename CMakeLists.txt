@@ -22,6 +22,18 @@ set(CMAKE_CUDA_COMPILER "/usr/local/cuda-11.5/bin/nvcc")
 #set(CMAKE_CUDA_COMPILER "/usr/local/cuda/bin/nvcc")
 set(CMAKE_DEFAULT_CUDA_ARCHITECTURES 50 52 60 61 75 86)
 
+if(POLICY CMP0074)
+    cmake_policy(SET CMP0074 NEW)
+endif()
+
+# Build example executables
+option(BUILD_EXAMPLES "Build library examples." ON)
+if (BUILD_EXAMPLES)
+    message("STATUS cuGridSearch::Build library examples = YES")
+else()
+    message("STATUS cuGridSearch::Build library examples = NO")
+endif()
+
 include_directories(
         include
         include/third_party
