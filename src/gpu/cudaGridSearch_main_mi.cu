@@ -18,10 +18,10 @@
 /* system header */
 
 
-#include <Eigen/Dense>
+//#include <Eigen/Dense>
 
-#include <unsupported/Eigen/NonLinearOptimization>
-#include <unsupported/Eigen/NumericalDiff>
+//#include <unsupported/Eigen/NonLinearOptimization>
+//#include <unsupported/Eigen/NumericalDiff>
 
 #include <cmath>
 #include <iostream>
@@ -116,46 +116,46 @@ void printMatrix(double **matrix, int ROWS, int COLUMNS) {
 }
 
 // Generic functor
-template<typename _Scalar, int NX = Eigen::Dynamic, int NY = Eigen::Dynamic>
-struct Functor
-{
-    typedef _Scalar Scalar;
-    enum {
-        InputsAtCompileTime = NX,
-        ValuesAtCompileTime = NY
-    };
-    typedef Eigen::Matrix<Scalar,InputsAtCompileTime,1> InputType;
-    typedef Eigen::Matrix<Scalar,ValuesAtCompileTime,1> ValueType;
-    typedef Eigen::Matrix<Scalar,ValuesAtCompileTime,InputsAtCompileTime> JacobianType;
-
-    int m_inputs, m_values;
-
-    Functor() : m_inputs(InputsAtCompileTime), m_values(ValuesAtCompileTime) {}
-    Functor(int inputs, int values) : m_inputs(inputs), m_values(values) {}
-
-    int inputs() const { return m_inputs; }
-    int values() const { return m_values; }
-
-};
+//template<typename _Scalar, int NX = Eigen::Dynamic, int NY = Eigen::Dynamic>
+//struct Functor
+//{
+//    typedef _Scalar Scalar;
+//    enum {
+//        InputsAtCompileTime = NX,
+//        ValuesAtCompileTime = NY
+//    };
+//    typedef Eigen::Matrix<Scalar,InputsAtCompileTime,1> InputType;
+//    typedef Eigen::Matrix<Scalar,ValuesAtCompileTime,1> ValueType;
+//    typedef Eigen::Matrix<Scalar,ValuesAtCompileTime,InputsAtCompileTime> JacobianType;
+//
+//    int m_inputs, m_values;
+//
+//    Functor() : m_inputs(InputsAtCompileTime), m_values(ValuesAtCompileTime) {}
+//    Functor(int inputs, int values) : m_inputs(inputs), m_values(values) {}
+//
+//    int inputs() const { return m_inputs; }
+//    int values() const { return m_values; }
+//
+//};
 
 CudaImage<uint8_t, CHANNELS> *image_fix_test;
 CudaImage<uint8_t, CHANNELS> *image_mov_test;
-struct my_functor : Functor<float>
-{
-    my_functor(void): Functor<float>(grid_dimension,grid_dimension) {}
-    int operator()(const Eigen::VectorXf &x, Eigen::VectorXf &fvec) const
-    {
-        float minParams[grid_dimension] = {0};
-        for (int i = 0; i < grid_dimension; i++)
-            minParams[i] = x(i);
-        nv_ext::Vec<float, grid_dimension> minParamsVec(minParams);
-
-        fvec(0) = sqrt(calcNCCAlt<func_precision, grid_precision, grid_dimension, CHANNELS, pixel_precision>(minParamsVec, *image_fix_test, *image_mov_test));
-        for (int i = 1; i < grid_dimension; i++)
-            fvec(i) = 0;
-        return 0;
-    }
-};
+//struct my_functor : Functor<float>
+//{
+//    my_functor(void): Functor<float>(grid_dimension,grid_dimension) {}
+//    int operator()(const Eigen::VectorXf &x, Eigen::VectorXf &fvec) const
+//    {
+//        float minParams[grid_dimension] = {0};
+//        for (int i = 0; i < grid_dimension; i++)
+//            minParams[i] = x(i);
+//        nv_ext::Vec<float, grid_dimension> minParamsVec(minParams);
+//
+//        fvec(0) = sqrt(calcNCCAlt<func_precision, grid_precision, grid_dimension, CHANNELS, pixel_precision>(minParamsVec, *image_fix_test, *image_mov_test));
+//        for (int i = 1; i < grid_dimension; i++)
+//            fvec(i) = 0;
+//        return 0;
+//    }
+//};
 
 // test grid search
 // classes typically store images in column major format so the images
@@ -363,16 +363,16 @@ int main(int argc, char **argv) {
     }
 
     // Non-linear optimizer
-    Eigen::VectorXf x(grid_dimension);
-    for(int i = 0; i < grid_dimension; i++)
-        x(i) = minParams[i];
+//    Eigen::VectorXf x(grid_dimension);
+//    for(int i = 0; i < grid_dimension; i++)
+//        x(i) = minParams[i];
     // std::cout << "x: " << x << std::endl;
 
-    my_functor functor;
-    Eigen::NumericalDiff<my_functor> numDiff(functor);
-    Eigen::LevenbergMarquardt<Eigen::NumericalDiff<my_functor>,float> lm(numDiff);
-    lm.parameters.maxfev = 2000;
-    lm.parameters.xtol = 1.0e-10;
+//    my_functor functor;
+//    Eigen::NumericalDiff<my_functor> numDiff(functor);
+//    Eigen::LevenbergMarquardt<Eigen::NumericalDiff<my_functor>,float> lm(numDiff);
+//    lm.parameters.maxfev = 2000;
+//    lm.parameters.xtol = 1.0e-10;
 
     // int ret = lm.minimize(x);
     // std::cout << "Iterations: " << lm.iter << ", Return code: " << ret << std::endl;

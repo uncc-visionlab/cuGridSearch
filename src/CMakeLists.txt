@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.8 FATAL_ERROR)
 
 find_package(Matlab)
 find_package(CUDA)
+find_package (Eigen3 3.3 NO_MODULE)
 
 if (MATLAB_FOUND)
     add_definitions(/DMATLAB_MEX_FILE) #define matlab macros
@@ -10,12 +11,12 @@ if (MATLAB_FOUND)
     add_definitions(/DUSE_MEX_CMD)
 endif (MATLAB_FOUND)
 
-find_package(Eigen3 QUIET)
-if (EIGEN_FOUND)
+if (TARGET Eigen3::Eigen)
+    #include_directories(${EIGEN3_INCLUDE_DIR})
     add_subdirectory(cpu)
 else()
     message("Eigen not found CPU code will not be built.")
-endif (EIGEN_FOUND)
+endif (TARGET Eigen3::Eigen)
 
 if (CUDA_FOUND)
     if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
