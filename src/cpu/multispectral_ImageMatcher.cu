@@ -291,8 +291,8 @@ int main(int argc, char **argv) {
                                                (grid_precision) 1.5, // scaleX
                                                (grid_precision) 1.5, // scaleY
                                                (grid_precision) -0.4,  // shearXY
-                                               (grid_precision) -xm / 2,  // translateX
-                                               (grid_precision) -ym / 2,  // translateY
+                                               (grid_precision) 100,  // translateX
+                                               (grid_precision) 100,  // translateY
                                                (grid_precision) 0, // keystoneX
                                                (grid_precision) 0  // keystoneY
     };
@@ -300,13 +300,13 @@ int main(int argc, char **argv) {
                                              (grid_precision) 5,
                                              (grid_precision) 5,
                                              (grid_precision) 0.2,
-                                             (grid_precision) xf - xm/2,
-                                             (grid_precision) yf - ym/2,
+                                             (grid_precision) xf-100,
+                                             (grid_precision) yf-100,
                                              (grid_precision) 0,
                                              (grid_precision) 0
     };
 
-    std::vector<grid_precision> num_samples = {(grid_precision) 16,
+    std::vector<grid_precision> num_samples = {(grid_precision) 8,
                                                (grid_precision) 8,
                                                (grid_precision) 8,
                                                (grid_precision) 5,
@@ -419,6 +419,7 @@ int main(int argc, char **argv) {
                     h31, h32};
 	outfile << "Homography,";
 	for(int i = 0; i < grid_dimension; i++) outfile << minH[i] << ",";
+    outfile << "\n";
 //    nv_ext::Vec<float, 8> H(initialH);
     nv_ext::Vec<float, 8> H(minH);
 
