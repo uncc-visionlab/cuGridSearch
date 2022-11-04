@@ -223,67 +223,6 @@ averageAbsoluteDifferenceH(nv_ext::Vec<grid_precision, D> &H, CudaImage<pixType>
     return (func_precision) sum_of_absolute_differences / num_errors;
 }
 
-inline CUDAFUNCTION void parametricAssignValues(float &h11, float &h12, float &h13, float &h21, float &h22, float &h23, float &h31, float &h32,
-                            int &m_width, int &m_height, int &f_width, int &f_height, int &row,
-                            float &lambda_start, float &lambda_end, float &v_x, float &v_y, float &p0_x, float &p0_y, bool &inImage) {
-    
-    float D = h11*h22 - h12*h21 - h11*h23*h32 + h12*h23*h31 + h13*h21*h32 - h13*h22*h31;
-    v_x = ((h22 - h32*row)*(D))/((h11*h22 - h12*h21 - h11*h32*row + h12*h31*row)*(h11*h22 - h12*h21 + f_width*h21*h32 - f_width*h22*h31 - h11*h32*row + h12*h31*row));
-    v_y = -((h21 - h31*row)*(D))/((h11*h22 - h12*h21 - h11*h32*row + h12*h31*row)*(h11*h22 - h12*h21 + f_width*h21*h32 - f_width*h22*h31 - h11*h32*row + h12*h31*row));
-
-    p0_x = (h13*h22 - h12*h23 + row*(h12 - h13*h32))/(h12*h21 - h11*h22 + row*(h11*h32 - h12*h31));
-    p0_y = -(h13*h21 - h11*h23 + row*(h11 - h13*h31))/(h12*h21 - h11*h22 + row*(h11*h32 - h12*h31));
-
-    float lambda_top =-((h11*h23 - h13*h21 - h11*row + h13*h31*row)*(h11*h22 - h12*h21 + f_width*h21*h32 - f_width*h22*h31 - h11*h32*row + h12*h31*row))/((h21 - h31*row)*(h11*h22 - h12*h21 - h11*h23*h32 + h12*h23*h31 + h13*h21*h32 - h13*h22*h31));
-    float x_top_ipt =-(h23 - row)/(h21 - h31*row);
-    float lambda_bottom =-((h11*h22 - h12*h21 + f_width*h21*h32 - f_width*h22*h31 - h11*h32*row + h12*h31*row)*(h11*h23 - h13*h21 - h11*row + h11*h22*m_height - h12*h21*m_height + h13*h31*row - h11*h32*m_height*row + h12*h31*m_height*row))/((h21 - h31*row)*(h11*h22 - h12*h21 - h11*h23*h32 + h12*h23*h31 + h13*h21*h32 - h13*h22*h31));
-    float x_bottom_ipt =-(h23 - row + h22*m_height - h32*m_height*row)/(h21 - h31*row);
-    float lambda_left =-((h12*h23 - h13*h22 - h12*row + h13*h32*row)*(h11*h22 - h12*h21 + f_width*h21*h32 - f_width*h22*h31 - h11*h32*row + h12*h31*row))/((h22 - h32*row)*(h11*h22 - h12*h21 - h11*h23*h32 + h12*h23*h31 + h13*h21*h32 - h13*h22*h31));
-    float y_left_ipt =-(h23 - row)/(h22 - h32*row);
-    float lambda_right =-((h11*h22 - h12*h21 + f_width*h21*h32 - f_width*h22*h31 - h11*h32*row + h12*h31*row)*(h12*h23 - h13*h22 - h12*row - h11*h22*m_width + h12*h21*m_width + h13*h32*row + h11*h32*m_width*row - h12*h31*m_width*row))/((h22 - h32*row)*(h11*h22 - h12*h21 - h11*h23*h32 + h12*h23*h31 + h13*h21*h32 - h13*h22*h31));
-    float y_right_ipt =-(h23 - row + h21*m_width - h31*m_width*row)/(h22 - h32*row);
-
-    if (x_top_ipt >= 0 && x_top_ipt < m_width && lambda_top >= 0 && lambda_top < f_width) {
-        if (v_y > 0) {
-            lambda_start = lambda_top;
-            inImage = true;
-        } else {
-            lambda_end = lambda_top;
-            inImage = true;
-        }
-    }
-
-    if (x_bottom_ipt >= 0 && x_bottom_ipt < m_width && lambda_bottom >= 0 && lambda_bottom < f_width) {
-        if (v_y < 0) {
-            lambda_start = lambda_bottom;        
-            inImage = true;
-        } else {
-            lambda_end = lambda_bottom;
-            inImage = true;
-        }
-    }
-
-    if (y_left_ipt >= 0 && y_left_ipt < m_height && lambda_left >= 0 && lambda_left < f_height) {
-        if (v_x > 0) {
-            lambda_start = lambda_left;
-            inImage = true;
-        } else {
-            lambda_end = lambda_left;
-            inImage = true;
-        }
-    }
-
-    if (y_right_ipt >= 0 && y_right_ipt < m_height && lambda_right >= 0 && lambda_right < f_height) {
-        if (v_x < 0) {
-            lambda_start = lambda_right;
-            inImage = true;
-        } else {
-            lambda_end = lambda_right;
-            inImage = true;
-        }
-    }
-}
-
 template<typename func_precision, typename grid_precision, uint32_t D, uint32_t CHANNELS, typename pixType>
 CUDAFUNCTION func_precision calcSQDAlt(nv_ext::Vec<grid_precision, D> &parameters,
                                     CudaImage<pixType, CHANNELS> img_moved, CudaImage<pixType, CHANNELS> img_fixed) {

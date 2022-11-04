@@ -37,6 +37,7 @@
 #include <string>
 #include <vector>
 #include <nvVectorNd.h>
+#include <chrono>
 
 #include "helper_functions.h"
 #include "helper_cuda.h"
@@ -313,6 +314,40 @@ __global__ void evaluationKernel_by_value(CudaGrid<grid_precision, D> grid,
 }
 
 template<typename func_precision, typename grid_precision, unsigned int D, typename ... Types>
+__global__ void evaluationKernel_by_value_block(CudaGrid<grid_precision, D> grid,
+                                          func_precision *result,
+                                          uint32_t result_size,
+                                          func_byvalue_t<func_precision, grid_precision, D, Types...> op,
+                                          nv_ext::Vec<grid_precision, D> gridpt,
+                                          Types ... arg_vals) {
+    int blockIndex = blockIdx.x;
+    if (blockIndex > result_size) {
+        return;
+    }
+//    grid_precision *grid_point = new grid_precision[D];
+    grid_precision grid_point[D];// = new grid_precision[D];
+//    if (threadIndex > 300000) {
+//        printf("index = %d\n", threadIndex);
+//    }
+    grid.indexToGridPoint(blockIndex, grid_point);
+#pragma unroll
+    for (int d = 0; d < D; d++) {
+        gridpt[d] = grid_point[d];
+    }
+//    printf("gridpt(%d,%d)\n", (int) grid_point[0], (int) grid_point[1]);
+//    gridpt[0] = gridpt[1] = 0;
+    if(threadIdx.x == 0) {
+        *(result + blockIndex) = 0;
+        // printf("blockIndex = %d\n", blockIndex);
+    }
+    __syncthreads();
+
+    *(result + blockIndex) += (*op)(gridpt, arg_vals...);
+//    printf("func_byvalue_t %p setting gridvalue[%d] = %f\n", *op, threadIndex, *(result + threadIndex));
+//    delete[] grid_point;
+}
+
+template<typename func_precision, typename grid_precision, unsigned int D, typename ... Types>
 __global__ void evaluationKernel_by_value_stream(CudaGrid<grid_precision, D> grid,
                                                  func_precision *result,
                                                  uint32_t STREAM_BLOCK_DIM,
@@ -335,7 +370,9 @@ __global__ void evaluationKernel_by_value_stream(CudaGrid<grid_precision, D> gri
     for (int d = 0; d < D; d++) {
         gridpt[d] = grid_point[d];
     }
-    *(result + streamIndex) = 0;
+    if(threadIdx.x == 0) 
+        *(result + streamIndex) = 0;
+    __syncthreads();
     *(result + streamIndex) += (*op)(gridpt, arg_vals...);
 }
 
@@ -468,28 +505,37 @@ struct CudaGridSearcher {
         nv_ext::Vec<grid_precision, D> pt((grid_precision) 0.0f);
 
         cudaEventRecord(start_event, 0);
+        std::chrono::time_point<std::chrono::system_clock> start, start2, end, end2;
 
+        start = std::chrono::system_clock::now();
+        start2 = std::chrono::system_clock::now();
         // queue nkernels in separate streams and record when they are done
         for (int i = 0; i < numStreamBlocks; ++i) {
             // printf("Beginning Stream block %d\n",i);
-            printf("Progress %.2f%% (%d/%d search blocks)\r", (float) (i + 1) * 100 / numStreamBlocks, i + 1,
-                   numStreamBlocks);
+            end = std::chrono::system_clock::now();
+            std::chrono::duration<double> elapsed_seconds = end - start;
+            printf("\rProgress %.2f%% (%d/%d search blocks) (time taken: %f)", (float) (i + 1) * 100 / numStreamBlocks, i + 1,
+                   numStreamBlocks, elapsed_seconds.count());
+            start = std::chrono::system_clock::now();
             for (int j = 0; j < numStreams; ++j) {
                 evaluationKernel_by_value_stream<<< numBlocks, numThreads, 0, streams[j]>>>(*_grid, (*_result).data(),
                                                                                             STREAM_BLOCK_DIM, i, j,
                                                                                             total_samples,
                                                                                             errorFunction,
                                                                                             pt, arg_vals...);
-                checkCudaErrors(cudaEventRecord(kernelEvent[j], streams[j]));
+                // checkCudaErrors(cudaEventRecord(kernelEvent[j], streams[j]));
 
                 // make the last stream wait for the kernel event to be recorded
-                checkCudaErrors(cudaStreamWaitEvent(streams[numStreams - 1], kernelEvent[j], 0));
+                // checkCudaErrors(cudaStreamWaitEvent(streams[numStreams - 1], kernelEvent[j], 0));
             }
-            checkCudaErrors(cudaEventRecord(stop_event, 0));
-            gpuErrchk(cudaPeekAtLastError());
-            checkCudaErrors(cudaEventSynchronize(stop_event));
+            // checkCudaErrors(cudaEventRecord(stop_event, 0));
+            // gpuErrchk(cudaPeekAtLastError());
+            // checkCudaErrors(cudaEventSynchronize(stop_event));
         }
-
+        checkCudaErrors(cudaDeviceSynchronize());
+        end2 = std::chrono::system_clock::now();
+        std::chrono::duration<double> elapsed_seconds2 = end2 - start2;
+        printf("\nFinal time: %fs\n", elapsed_seconds2.count());
         delete[] streams;
         delete[] kernelEvent;
 
@@ -601,11 +647,50 @@ struct CudaGridSearcher {
 
         // create grid point and result image
         nv_ext::Vec<grid_precision, D> pt((grid_precision) 0.0f);
+        std::chrono::time_point<std::chrono::system_clock> start, end;
 
+        start = std::chrono::system_clock::now();
         evaluationKernel_by_value<<< gridDim, blockDim>>>(*_grid, (*_result).data(), total_samples, errorFunction,
                                                           pt, arg_vals...);
         gpuErrchk(cudaPeekAtLastError());
         gpuErrchk(cudaDeviceSynchronize());
+        end = std::chrono::system_clock::now();
+        std::chrono::duration<double> elapsed_seconds = end - start;
+        printf("Time Taken: %f\n", elapsed_seconds.count());
+    }
+    // this will search a function with by-value arguments
+
+    template<typename ... Types>
+    void search_by_value_block(func_byvalue_t<func_precision, grid_precision, D, Types ...> errorFunction, int numThreads,
+                         Types &... arg_vals) {
+
+        std::vector<grid_precision> point(_grid->getDimension(), 0);
+        uint32_t total_samples = _grid->numElements();
+        std::cout << "CudaGrid has " << total_samples << " search samples." << std::endl;
+//        std::cout << "CudaTensor for results has " << _result->size() << " values." << std::endl;
+
+        // // compute 1D search grid, block and thread index pattern
+        // dim3 gridDim(1, 1, 1), blockDim(BLOCK_DIM, 1, 1);
+        // if (total_samples > BLOCK_DIM) {
+        //     gridDim.x = (total_samples / (uint32_t) BLOCK_DIM) + 1;
+        // } else {
+        //     blockDim.x = total_samples;
+        // }
+        
+        dim3 gridDim(total_samples, 1, 1), blockDim(numThreads, 1, 1);
+
+        // create grid point and result image
+        nv_ext::Vec<grid_precision, D> pt((grid_precision) 0.0f);
+        std::chrono::time_point<std::chrono::system_clock> start, end;
+
+        start = std::chrono::system_clock::now();
+        evaluationKernel_by_value_block<<< gridDim, blockDim>>>(*_grid, (*_result).data(), total_samples, errorFunction,
+                                                          pt, arg_vals...);
+        gpuErrchk(cudaPeekAtLastError());
+        gpuErrchk(cudaDeviceSynchronize());
+        end = std::chrono::system_clock::now();
+        std::chrono::duration<double> elapsed_seconds = end - start;
+        printf("Time Taken: %f\n", elapsed_seconds.count());
     }
 
     // this will search a function with by-reference arguments

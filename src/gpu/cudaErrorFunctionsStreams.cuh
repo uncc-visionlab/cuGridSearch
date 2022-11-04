@@ -163,6 +163,124 @@ __device__ func_precision calcNCCstream(nv_ext::Vec<grid_precision, D> &H,
 }
 
 template<typename func_precision, typename grid_precision, uint32_t D, uint32_t CHANNELS, typename pixType>
+__device__ func_precision calcNCCstreamAlt(nv_ext::Vec<grid_precision, D> &H,
+                        CudaImage<pixType, CHANNELS> img_moved, CudaImage<pixType, CHANNELS> img_fixed) {
+    int y = threadIdx.x;
+    if(y >= img_fixed.height()) 
+        return;
+
+    if (H.size() != 8) {
+        printf("Error calcNCCstream() requires an 8-parameter homography and %d parameters given! Exiting.\n",
+                H.size());
+        return 0;
+    }
+
+    func_precision output = 0;
+
+    int colsf = img_fixed.width();
+    int rowsf = img_fixed.height();
+    int colsm = img_moved.width();
+    int rowsm = img_moved.height();
+
+    __shared__ float i1[THREADS_PER_BLOCK];
+    __shared__ float i2[THREADS_PER_BLOCK];
+    __shared__ float ic[THREADS_PER_BLOCK];
+    __shared__ float mov_area[THREADS_PER_BLOCK];
+    __shared__ float fix_area[THREADS_PER_BLOCK];
+
+    i1[y] = 0;
+    i2[y] = 0;
+    ic[y] = 0;
+    mov_area[y] = 0;
+    fix_area[y] = 0;
+
+    float h11 = 0, h12 = 0, h13 = 0, h21 = 0, h22 = 0, h23 = 0, h31 = 0, h32 = 0, cx = (float)colsm/2, cy = (float)rowsm/2;
+    parametersToHomography<float,8>(H, cx, cy,
+        h11, h12, h13,
+        h21, h22, h23,
+        h31, h32);
+
+    float lambda_start = 0;
+    float lambda_end = colsf;
+    float v_x = 0;
+    float v_y = 0;
+    float p0_x = 0;
+    float p0_y = 0;
+    bool inImage = false;
+
+    parametricAssignValues(h11, h12, h13, h21, h22, h23, h31, h32,
+                            colsm, rowsm, colsf, rowsf, y,
+                            lambda_start, lambda_end, v_x, v_y, p0_x, p0_y, inImage);
+
+    // printf("row = %d\n", row);
+    // printf("lambda_start = %f, lambda_end = %f, v_x = %f, v_y = %f, p_x = %f, p_y = %f\n", lambda_start, lambda_end, v_x, v_y, p0_x, p0_y);
+
+    float mag_norm = sqrt(v_x * v_x + v_y * v_y);
+
+    for (float lambda = lambda_start; lambda < lambda_end && lambda < colsf; lambda += 1) {
+    // for(int x = 0; x < colsf; x++) {
+        // float new_x = 0; float new_y = 0;
+        // calcNewCoordH(h11, h12, h13,
+        //               h21, h22, h23,
+        //               h31, h32,
+        //               x, y,
+        //               new_x, new_y);
+        
+        float new_x = lambda * v_x + p0_x;
+        float new_y = lambda * v_y + p0_y;
+
+        //if (img_moved.inImage(new_y, new_x)) {
+        if (inImage){
+            for(int c = 0; c < CHANNELS; c++) {
+                float value_m = img_moved.valueAt_bilinear(new_y, new_x, c);
+                float value_f = img_fixed.valueAt_bilinear(y, lambda, c);
+
+                value_m /= 255.0f;
+                value_f /= 255.0f;
+                ic[y] += (value_m * value_f);
+                i1[y] += value_m * value_m;
+                i2[y] += value_f * value_f;
+            }
+
+            mov_area[y] += mag_norm;
+            fix_area[y] += 1;
+        }
+
+    }
+
+    __syncthreads();
+
+    if(threadIdx.x == 0) {
+        float i1t = 0;
+        float i2t = 0;
+        float ict = 0;
+        float mov_areat = 0;
+        float fix_areat = 0;
+
+        for(int i = 0; i < img_fixed.height(); i++) {
+            i1t += i1[i];
+            i2t += i2[i];
+            ict += ic[i];
+            mov_areat += mov_area[i];
+            fix_areat += fix_area[i];
+        }
+        // printf("mov_areat = %f / %f (%d), fix_areat = %f/ (%f,%f * %f,%f) (%d)\n",mov_areat, (colsm * rowsm * H[2]), (mov_areat / (colsm * rowsm * H[2])) > 0.25, fix_areat, colsf, img_fixed.height(), rowsf, img_fixed.width(), (fix_areat / (colsf * rowsf)) > 0.35);
+        if(mov_areat / (colsm * rowsm * H[2]) > 0.25 && (fix_areat / (colsf * rowsf)) > 0.35)
+            output = (func_precision) -1 * ict / sqrt(i1t * i2t);
+        else
+            output = 0;
+    }
+    
+    __syncthreads();
+    if(threadIdx.x == 0) {
+        // printf("Output = %f\n",output);
+        return output;
+    }
+    else
+        return (func_precision) 0;
+}
+
+template<typename func_precision, typename grid_precision, uint32_t D, uint32_t CHANNELS, typename pixType>
 __device__ func_precision calcSQDstream(nv_ext::Vec<grid_precision, D> &H,
                         CudaImage<pixType, CHANNELS> img_moved, CudaImage<pixType, CHANNELS> img_fixed) {
     int y = blockDim.x * blockIdx.x + threadIdx.x;

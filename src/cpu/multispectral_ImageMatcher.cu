@@ -18,10 +18,10 @@
 /* system header */
 
 
-#include <Eigen/Dense>
+// #include <Eigen/Dense>
 
-#include <unsupported/Eigen/NonLinearOptimization>
-#include <unsupported/Eigen/NumericalDiff>
+// #include <unsupported/Eigen/NonLinearOptimization>
+// #include <unsupported/Eigen/NumericalDiff>
 
 #include <cmath>
 #include <iostream>
@@ -30,6 +30,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <vector>
+#include <fstream>
+#include <chrono>
 
 /* nVIDIA CUDA header */
 //#include <cuda.h>
@@ -45,11 +47,11 @@
 //#include "cudaTensor.cuh"
 //
 //#include "../gpu/cudaGridSearch.cuh"
-#include "../gpu/cudaErrorFunctions.cuh"
-//#include "../gpu/cudaErrorFunction_mi.cuh"
+//#include "../gpu/cudaErrorFunctions.cuh"
+#include "../gpu/cudaErrorFunction_mi.cuh"
 //#include "../gpu/cudaErrorFunctionsStreams.cuh"
 //#include "../gpu/cudaErrorFunction_miStreams.cuh"
-//#include "../gpu/cudaImageFunctions.cuh"
+#include "../gpu/cudaImageFunctions.cuh"
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_FAILURE_USERMSG
@@ -77,7 +79,7 @@ typedef uint8_t pixel_precision; // the type of values in the image, e.g., float
 // SQD/NCC/MI
 typedef func_byvalue_t<func_precision, grid_precision, grid_dimension,
         CudaImage<pixel_precision, CHANNELS>, CudaImage<pixel_precision, CHANNELS> > image_err_func_byvalue;
-__device__ image_err_func_byvalue dev_func_byvalue_ptr = calcNCCAlt<func_precision, grid_precision,
+__device__ image_err_func_byvalue dev_func_byvalue_ptr = calcMIAlt<func_precision, grid_precision,
         grid_dimension, CHANNELS, pixel_precision>;
 
 #define cudaCheckErrors(msg) \
@@ -114,7 +116,7 @@ void printMatrix(double **matrix, int ROWS, int COLUMNS) {
         std::cout << std::endl;
     }
 }
-
+/*
 // Generic functor
 template<typename _Scalar, int NX = Eigen::Dynamic, int NY = Eigen::Dynamic>
 struct Functor
@@ -137,9 +139,10 @@ struct Functor
     int values() const { return m_values; }
 
 };
-
+*/
 CudaImage<uint8_t, CHANNELS> *image_fix_test;
 CudaImage<uint8_t, CHANNELS> *image_mov_test;
+/*
 struct my_functor : Functor<float>
 {
     my_functor(void): Functor<float>(grid_dimension,grid_dimension) {}
@@ -156,7 +159,7 @@ struct my_functor : Functor<float>
         return 0;
     }
 };
-
+*/
 // test grid search
 // classes typically store images in column major format so the images
 // stored are the transpose of that shown in initialization below
@@ -209,6 +212,12 @@ int main(int argc, char **argv) {
         std::cout << options.help() << std::endl;
         return EXIT_SUCCESS;
     }
+
+    std::ofstream outfile;
+    outfile.open("imageMatcherResults.txt", std::ios_base::app);
+	outfile << "input files," << img_fixed_filename.c_str() << "," << img_moved_filename.c_str() << ",";
+	outfile << "output fused image," << img_fused_filename << ",";
+	outfile << "DEPTH," << DEPTH << ",";
 
     /* set GPU grid & block configuration */
     image_err_func_byvalue host_func_byval_ptr;
@@ -287,7 +296,7 @@ int main(int argc, char **argv) {
                                                (grid_precision) 0, // keystoneX
                                                (grid_precision) 0  // keystoneY
     };
-    std::vector<grid_precision> end_point = {(grid_precision) PI,
+    std::vector<grid_precision> end_point = {(grid_precision) 2*PI - PI/4,
                                              (grid_precision) 5,
                                              (grid_precision) 5,
                                              (grid_precision) 0.2,
@@ -297,18 +306,26 @@ int main(int argc, char **argv) {
                                              (grid_precision) 0
     };
 
-    std::vector<grid_precision> num_samples = {(grid_precision) 8,
+    std::vector<grid_precision> num_samples = {(grid_precision) 16,
                                                (grid_precision) 8,
                                                (grid_precision) 8,
                                                (grid_precision) 5,
-                                               (grid_precision) (xf + 1) / 10,
-                                               (grid_precision) (yf + 1) / 10,
+                                               (grid_precision) (xf + 1) / 25,
+                                               (grid_precision) (yf + 1) / 25,
                                                (grid_precision) 1,
                                                (grid_precision) 1
     };
 
+	outfile << "start_point,";
+	for(int i = 0; i < grid_dimension; i++) outfile << start_point[i] << ",";
+	outfile << "end_point,";
+	for(int i = 0; i < grid_dimension; i++) outfile << end_point[i] << ",";
+	outfile << "num_samples,";
+	for(int i = 0; i < grid_dimension; i++) outfile << num_samples[i] << ",";
     float minParams[grid_dimension] = {0};
 
+    std::chrono::time_point<std::chrono::system_clock> start, end;
+	start = std::chrono::system_clock::now();
     for (int iii = 0; iii < DEPTH; iii++) {
         CudaGrid<grid_precision, grid_dimension> translation_xy_grid;
         checkCudaErrors(cudaMalloc(&translation_xy_grid.data(), translation_xy_grid.bytesSize()));
@@ -361,18 +378,25 @@ int main(int argc, char **argv) {
         checkCudaErrors(cudaFree(translation_xy_grid.data()));
         checkCudaErrors(cudaFree(func_values.data()));
     }
+    end = std::chrono::system_clock::now();
+    std::chrono::duration<double> elapsed_seconds = end - start;
+    printf("Total Time Taken: %f\n", elapsed_seconds.count());
 
+	outfile << "Total Time," << elapsed_seconds.count() << ",";
+
+	outfile << "MinParams,";
+	for(int i = 0; i < grid_dimension; i++) outfile << minParams[i] << ",";
     // Non-linear optimizer
-    Eigen::VectorXf x(grid_dimension);
-    for(int i = 0; i < grid_dimension; i++)
-        x(i) = minParams[i];
+    // Eigen::VectorXf x(grid_dimension);
+    // for(int i = 0; i < grid_dimension; i++)
+    //     x(i) = minParams[i];
     // std::cout << "x: " << x << std::endl;
 
-    my_functor functor;
-    Eigen::NumericalDiff<my_functor> numDiff(functor);
-    Eigen::LevenbergMarquardt<Eigen::NumericalDiff<my_functor>,float> lm(numDiff);
-    lm.parameters.maxfev = 2000;
-    lm.parameters.xtol = 1.0e-10;
+    // my_functor functor;
+    // Eigen::NumericalDiff<my_functor> numDiff(functor);
+    // Eigen::LevenbergMarquardt<Eigen::NumericalDiff<my_functor>,float> lm(numDiff);
+    // lm.parameters.maxfev = 2000;
+    //lm.parameters.xtol = 1.0e-10;
 
     // int ret = lm.minimize(x);
     // std::cout << "Iterations: " << lm.iter << ", Return code: " << ret << std::endl;
@@ -385,7 +409,7 @@ int main(int argc, char **argv) {
 
     float h11 = 0, h12 = 0, h13 = 0, h21 = 0, h22 = 0, h23 = 0, h31 = 0, h32 = 0, cx = (float)xm/2, cy = (float)ym/2;
     nv_ext::Vec<float, grid_dimension> minParamsVec(minParams);
-    std::cout << "Min Value check: " << calcNCCAlt<func_precision, grid_precision, grid_dimension, CHANNELS, pixel_precision>(minParamsVec, *image_fix_test, *image_mov_test) << std::endl;
+    //std::cout << "Min Value check: " << calcMIAlt<func_precision, grid_precision, grid_dimension, CHANNELS, pixel_precision>(minParamsVec, *image_fix_test, *image_mov_test) << std::endl;
     parametersToHomography<grid_precision,grid_dimension>(minParamsVec, cx, cy,
                                                           h11, h12, h13,
                                                           h21, h22, h23,
@@ -393,6 +417,8 @@ int main(int argc, char **argv) {
     float minH[] = {h11, h12, h13,
                     h21, h22, h23,
                     h31, h32};
+	outfile << "Homography,";
+	for(int i = 0; i < grid_dimension; i++) outfile << minH[i] << ",";
 //    nv_ext::Vec<float, 8> H(initialH);
     nv_ext::Vec<float, 8> H(minH);
 
