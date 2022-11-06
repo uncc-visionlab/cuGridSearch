@@ -270,6 +270,8 @@ int main(int argc, char **argv) {
         yf = y_new;
         stbi_image_free(dataf);
         dataf = data_new;
+        stbi_write_png("resized_image.png", x_new, y_new, CHANNELS, data_new,
+                       x_new * sizeof(uint8_t) * CHANNELS);
     } else if (xm * ym > MAX_SIZE_DISCREPANCY * xf * yf) {
         x_new = xf;
         y_new = yf;
@@ -285,6 +287,8 @@ int main(int argc, char **argv) {
         ym = y_new;
         stbi_image_free(datam);
         datam = data_new;
+        stbi_write_png("resized_image.png", x_new, y_new, CHANNELS, data_new,
+                       x_new * sizeof(uint8_t) * CHANNELS);
     }
     // number of components must be equal on construction
     // assert(nf == CHANNELS && nm == CHANNELS); // Does not work if using gray scale, nf/nm are based on original channels
@@ -331,7 +335,7 @@ int main(int argc, char **argv) {
     // Example MI
     scaleX = 1;
     scaleY = 1;
-    float MAX_NONOVERLAPPING_PCT = 5.0;
+    float MAX_NONOVERLAPPING_PCT = 2.0;
     std::vector<grid_precision> start_point = {(grid_precision) 0, // theta
                                                (grid_precision) 0.7, // scaleX
                                                (grid_precision) 0.7, // scaleY
@@ -342,9 +346,9 @@ int main(int argc, char **argv) {
                                                (grid_precision) 0  // keystoneY
     };
 
-    std::vector<grid_precision> num_samples = {(grid_precision) 16,
-                                               (grid_precision) 8,
-                                               (grid_precision) 8,
+    std::vector<grid_precision> num_samples = {(grid_precision) 32,
+                                               (grid_precision) 16,
+                                               (grid_precision) 16,
                                                (grid_precision) 5,
                                                (grid_precision) (xf + 1) / 30,
                                                (grid_precision) (yf + 1) / 30,
@@ -353,8 +357,8 @@ int main(int argc, char **argv) {
     };
 
     std::vector<grid_precision> end_point = {static_cast<float>((grid_precision) 2 * PI - PI / num_samples[0]),
-                                             (grid_precision) 1.2,
-                                             (grid_precision) 1.2,
+                                             (grid_precision) 1.3,
+                                             (grid_precision) 1.3,
                                              (grid_precision) 0.2,
                                              (grid_precision) xf - xm / MAX_NONOVERLAPPING_PCT,
                                              (grid_precision) yf - ym / MAX_NONOVERLAPPING_PCT,
