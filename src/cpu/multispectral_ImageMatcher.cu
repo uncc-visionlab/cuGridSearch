@@ -59,6 +59,10 @@
 
 #include "stb_image.h"
 
+#define STB_IMAGE_RESIZE_IMPLEMENTATION
+
+#include "stb_image_resize.h"
+
 #define PI 3.14159265
 
 #define grid_dimension 8        // the dimension of the grid, e.g., 1 => 1D grid, 2 => 2D grid, 3=> 3D grid, etc.
@@ -116,6 +120,7 @@ void printMatrix(double **matrix, int ROWS, int COLUMNS) {
         std::cout << std::endl;
     }
 }
+
 /*
 // Generic functor
 template<typename _Scalar, int NX = Eigen::Dynamic, int NY = Eigen::Dynamic>
@@ -196,12 +201,14 @@ int main(int argc, char **argv) {
         img_fixed_filename = result["i_ref"].as<std::string>();
     } else {
         std::cerr << "No input reference image filename was provided. Exiting.." << std::endl;
+        std::cout << options.help() << std::endl;
         return EXIT_FAILURE;
     }
     if (result.count("i_mov")) {
         img_moved_filename = result["i_mov"].as<std::string>();
     } else {
         std::cerr << "No input moving image filename was provided. Exiting.." << std::endl;
+        std::cout << options.help() << std::endl;
         return EXIT_FAILURE;
     }
     img_out_filename = result["output"].as<std::string>();
@@ -215,9 +222,9 @@ int main(int argc, char **argv) {
 
     std::ofstream outfile;
     outfile.open("imageMatcherResults.txt", std::ios_base::app);
-	outfile << "input files," << img_fixed_filename.c_str() << "," << img_moved_filename.c_str() << ",";
-	outfile << "output fused image," << img_fused_filename << ",";
-	outfile << "DEPTH," << DEPTH << ",";
+    outfile << "input files," << img_fixed_filename.c_str() << "," << img_moved_filename.c_str() << ",";
+    outfile << "output fused image," << img_fused_filename << ",";
+    outfile << "DEPTH," << DEPTH << ",";
 
     /* set GPU grid & block configuration */
     image_err_func_byvalue host_func_byval_ptr;
@@ -242,6 +249,43 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
+    float MAX_SIZE_DISCREPANCY = 1.5;
+    int x_new, y_new;
+    uint8_t *data_new;
+    if (xf * yf > MAX_SIZE_DISCREPANCY * xm * ym) { // resize fixed image
+        x_new = xm;
+        y_new = ym;
+        float scale_factor_x = xm / xf;
+        float scale_factor_y = ym / yf;
+
+        std::cerr << "Rescaling " + img_fixed_filename + " from " << "(" << xf << "," << yf << ")" << " to "
+                  << "(" << x_new << "," << y_new << ")" << std::endl;
+        data_new = (uint8_t *) malloc(x_new * y_new * CHANNELS);
+        stbir_resize_uint8(dataf, xf, yf, 0, data_new, x_new, y_new, 0, CHANNELS);
+        if (data_new == NULL) {
+            std::cerr << "Image resize " + img_fixed_filename + " failed!" << std::endl;
+            return EXIT_FAILURE;
+        }
+        xf = x_new;
+        yf = y_new;
+        stbi_image_free(dataf);
+        dataf = data_new;
+    } else if (xm * ym > MAX_SIZE_DISCREPANCY * xf * yf) {
+        x_new = xf;
+        y_new = yf;
+        std::cerr << "Rescaling " + img_moved_filename + " from " << "(" << xf << "," << yf << ")" << " to "
+                  << "(" << x_new << "," << y_new << ")" << std::endl;
+        data_new = (uint8_t *) malloc(x_new * y_new * CHANNELS);
+        stbir_resize_uint8(datam, xm, ym, 0, data_new, x_new, y_new, 0, CHANNELS);
+        if (data_new == NULL) {
+            std::cerr << "Image resize " + img_moved_filename + " failed!" << std::endl;
+            return EXIT_FAILURE;
+        }
+        xm = x_new;
+        ym = y_new;
+        stbi_image_free(datam);
+        datam = data_new;
+    }
     // number of components must be equal on construction
     // assert(nf == CHANNELS && nm == CHANNELS); // Does not work if using gray scale, nf/nm are based on original channels
 
@@ -287,45 +331,47 @@ int main(int argc, char **argv) {
     // Example MI
     scaleX = 1;
     scaleY = 1;
+    float MAX_NONOVERLAPPING_PCT = 5.0;
     std::vector<grid_precision> start_point = {(grid_precision) 0, // theta
-                                               (grid_precision) 1.5, // scaleX
-                                               (grid_precision) 1.5, // scaleY
+                                               (grid_precision) 0.7, // scaleX
+                                               (grid_precision) 0.7, // scaleY
                                                (grid_precision) -0.4,  // shearXY
-                                               (grid_precision) 100,  // translateX
-                                               (grid_precision) 100,  // translateY
+                                               (grid_precision) -xm / MAX_NONOVERLAPPING_PCT,  // translateX
+                                               (grid_precision) -ym / MAX_NONOVERLAPPING_PCT,  // translateY
                                                (grid_precision) 0, // keystoneX
                                                (grid_precision) 0  // keystoneY
     };
-    std::vector<grid_precision> end_point = {(grid_precision) 2*PI - PI/4,
-                                             (grid_precision) 5,
-                                             (grid_precision) 5,
-                                             (grid_precision) 0.2,
-                                             (grid_precision) xf-100,
-                                             (grid_precision) yf-100,
-                                             (grid_precision) 0,
-                                             (grid_precision) 0
-    };
 
-    std::vector<grid_precision> num_samples = {(grid_precision) 8,
+    std::vector<grid_precision> num_samples = {(grid_precision) 16,
                                                (grid_precision) 8,
                                                (grid_precision) 8,
                                                (grid_precision) 5,
-                                               (grid_precision) (xf + 1) / 25,
-                                               (grid_precision) (yf + 1) / 25,
+                                               (grid_precision) (xf + 1) / 30,
+                                               (grid_precision) (yf + 1) / 30,
                                                (grid_precision) 1,
                                                (grid_precision) 1
     };
 
-	outfile << "start_point,";
-	for(int i = 0; i < grid_dimension; i++) outfile << start_point[i] << ",";
-	outfile << "end_point,";
-	for(int i = 0; i < grid_dimension; i++) outfile << end_point[i] << ",";
-	outfile << "num_samples,";
-	for(int i = 0; i < grid_dimension; i++) outfile << num_samples[i] << ",";
+    std::vector<grid_precision> end_point = {static_cast<float>((grid_precision) 2 * PI - PI / num_samples[0]),
+                                             (grid_precision) 1.2,
+                                             (grid_precision) 1.2,
+                                             (grid_precision) 0.2,
+                                             (grid_precision) xf - xm / MAX_NONOVERLAPPING_PCT,
+                                             (grid_precision) yf - ym / MAX_NONOVERLAPPING_PCT,
+                                             (grid_precision) 0,
+                                             (grid_precision) 0
+    };
+
+    outfile << "start_point,";
+    for (int i = 0; i < grid_dimension; i++) outfile << start_point[i] << ",";
+    outfile << "end_point,";
+    for (int i = 0; i < grid_dimension; i++) outfile << end_point[i] << ",";
+    outfile << "num_samples,";
+    for (int i = 0; i < grid_dimension; i++) outfile << num_samples[i] << ",";
     float minParams[grid_dimension] = {0};
 
     std::chrono::time_point<std::chrono::system_clock> start, end;
-	start = std::chrono::system_clock::now();
+    start = std::chrono::system_clock::now();
     for (int iii = 0; iii < DEPTH; iii++) {
         CudaGrid<grid_precision, grid_dimension> translation_xy_grid;
         checkCudaErrors(cudaMalloc(&translation_xy_grid.data(), translation_xy_grid.bytesSize()));
@@ -344,8 +390,9 @@ int main(int argc, char **argv) {
 
         // first template argument is the error function return type
         // second template argument is the grid point value type
-        CudaGridSearcher<func_precision, grid_precision, grid_dimension> translation_xy_gridsearcher(translation_xy_grid,
-                                                                                                     func_values);
+        CudaGridSearcher<func_precision, grid_precision, grid_dimension> translation_xy_gridsearcher(
+                translation_xy_grid,
+                func_values);
 
         // Mutual Information
         // Copy device function pointer for the function having by-value parameters to host side
@@ -382,10 +429,10 @@ int main(int argc, char **argv) {
     std::chrono::duration<double> elapsed_seconds = end - start;
     printf("Total Time Taken: %f\n", elapsed_seconds.count());
 
-	outfile << "Total Time," << elapsed_seconds.count() << ",";
+    outfile << "Total Time," << elapsed_seconds.count() << ",";
 
-	outfile << "MinParams,";
-	for(int i = 0; i < grid_dimension; i++) outfile << minParams[i] << ",";
+    outfile << "MinParams,";
+    for (int i = 0; i < grid_dimension; i++) outfile << minParams[i] << ",";
     // Non-linear optimizer
     // Eigen::VectorXf x(grid_dimension);
     // for(int i = 0; i < grid_dimension; i++)
@@ -407,19 +454,19 @@ int main(int argc, char **argv) {
     // for(int i = 0; i < grid_dimension; i++)
     //     minParams[i] = x(i);
 
-    float h11 = 0, h12 = 0, h13 = 0, h21 = 0, h22 = 0, h23 = 0, h31 = 0, h32 = 0, cx = (float)xm/2, cy = (float)ym/2;
+    float h11 = 0, h12 = 0, h13 = 0, h21 = 0, h22 = 0, h23 = 0, h31 = 0, h32 = 0;
+    float cx = (float) xm / 2, cy = (float) ym / 2;
     nv_ext::Vec<float, grid_dimension> minParamsVec(minParams);
     //std::cout << "Min Value check: " << calcMIAlt<func_precision, grid_precision, grid_dimension, CHANNELS, pixel_precision>(minParamsVec, *image_fix_test, *image_mov_test) << std::endl;
-    parametersToHomography<grid_precision,grid_dimension>(minParamsVec, cx, cy,
-                                                          h11, h12, h13,
-                                                          h21, h22, h23,
-                                                          h31, h32);
+    parametersToHomography<grid_precision, grid_dimension>(minParamsVec, cx, cy,
+                                                           h11, h12, h13,
+                                                           h21, h22, h23,
+                                                           h31, h32);
     float minH[] = {h11, h12, h13,
                     h21, h22, h23,
                     h31, h32};
-	outfile << "Homography,";
-	for(int i = 0; i < grid_dimension; i++) outfile << minH[i] << ",";
-    outfile << "\n";
+    outfile << "Homography,";
+    for (int i = 0; i < grid_dimension; i++) outfile << minH[i] << ",";
 //    nv_ext::Vec<float, 8> H(initialH);
     nv_ext::Vec<float, 8> H(minH);
 
