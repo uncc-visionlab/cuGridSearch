@@ -362,8 +362,6 @@ __global__ void filterProcess(const CudaImage<float, 1> filter,
     if (col < width && row < height) {
         float pixVal = 0;
         int pixels = 0;
-        col -= (filter.width()-1) / 2;
-        row -= (filter.height()-1) / 2;
         for (int channel = 0; channel < CHANNELS; ++channel) {
             switch (channel_actions[channel]) {
                 case COPY:
@@ -371,8 +369,10 @@ __global__ void filterProcess(const CudaImage<float, 1> filter,
                     break;
                 case FILTER:
                 default:
-                    for (int filterRow = 0; filterRow < filter.height() + 1; ++filterRow, ++row) {
-                        for (int filterCol = 0; filterCol < filter.width() + 1; ++filterCol, ++ col) {
+                    col -= (filter.width()-1) / 2;
+                    row -= (filter.height()-1) / 2;
+                    for (int filterRow = 0; filterRow < filter.height(); ++filterRow, ++row) {
+                        for (int filterCol = 0; filterCol < filter.width(); ++filterCol, ++col) {
                             if (row > -1 && row < height && col > -1 && col < width) {
                                 pixVal += filter.at(filterRow,filterCol) * imageIn.at(row, col, channel);
                                 pixels++;
@@ -380,6 +380,7 @@ __global__ void filterProcess(const CudaImage<float, 1> filter,
                             imageOut.template at<pixType>(row, col, channel) = (pixType) (pixVal / pixels);
                         }
                     }
+                    break;
             }
         }
     }

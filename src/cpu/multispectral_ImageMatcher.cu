@@ -314,7 +314,7 @@ int main(int argc, char **argv) {
     checkCudaErrors(cudaMalloc(&avg_filter_5x5.data(), avg_filter_5x5.bytesSize()));
 
     avg_filter_5x5.setValuesFromVector(std::vector<float>(avg_filter_5x5_data, avg_filter_5x5_data + 5 * 5));
-
+    avg_filter_5x5.display("avg_filter_5x5");
     CudaImage<uint8_t, CHANNELS> image_fix_filtered(yf, xf);
     checkCudaErrors(cudaMalloc(&image_fix_filtered.data(), image_fix_filtered.bytesSize()));
     CHANNEL_ACTION actions[CHANNELS] {FILTER};

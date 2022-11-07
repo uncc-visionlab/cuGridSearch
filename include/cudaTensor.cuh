@@ -579,8 +579,17 @@ struct CudaImage : public CudaTensor<precision, 3> {
         dim3 blockSize(16, 16, 1);
         dim3 gridSize(this->width() / blockSize.x, this->height() / blockSize.y, 1);
         assert(this->_total_size == out._total_size);
-
-        filterProcess <<< gridSize, blockSize >>>(filter, *this, out, actions);
+        const enum CHANNEL_ACTION *actions_dev;
+//        checkCudaErrors(
+        cudaMalloc((void **)&actions_dev, CHANNELS*sizeof(CHANNEL_ACTION));
+//                );
+//        checkCudaErrors(
+        cudaMemcpy((void *)actions_dev, actions, CHANNELS*sizeof(CHANNEL_ACTION), cudaMemcpyHostToDevice);
+//                );
+        filterProcess <<< gridSize, blockSize >>>(filter, *this, out, actions_dev);
+//        checkCudaErrors(
+        cudaFree((void *)actions_dev);
+//                );
 
         return out;
     }
