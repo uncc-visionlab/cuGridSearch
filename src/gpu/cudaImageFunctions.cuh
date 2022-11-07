@@ -128,7 +128,8 @@ bool endsWithCaseInsensitive(std::string mainStr, std::string toMatch) {
 
 template<typename pixType, uint8_t CHANNELS>
 void
-writeTransformedImageToDisk(CudaImage<pixType, CHANNELS> image, int rowsf, int colsf, nv_ext::Vec<float, 8> H, std::string img_out_filename) {
+writeTransformedImageToDisk(CudaImage<pixType, CHANNELS> image, int rowsf, int colsf, nv_ext::Vec<float, 8> H,
+                            std::string img_out_filename) {
     CudaImage<uint8_t, CHANNELS> image_out(rowsf, colsf);
     checkCudaErrors(cudaMalloc(&image_out.data(), image_out.bytesSize()));
     checkCudaErrors(cudaMemset(image_out.data(), 0, image_out.bytesSize()));
@@ -179,10 +180,10 @@ void writeAlignedAndFusedImageToDisk(CudaImage<pixType, CHANNELS> image_fix,
 
 template<typename Tp, uint8_t D>
 CUDAFUNCTION void parametersToHomography(nv_ext::Vec<Tp, D> &parameters,
-                            float &cx, float& cy,
-                            float &h11, float &h12, float &h13,
-                            float &h21, float &h22, float &h23,
-                            float &h31, float &h32) {
+                                         float &cx, float &cy,
+                                         float &h11, float &h12, float &h13,
+                                         float &h21, float &h22, float &h23,
+                                         float &h31, float &h32) {
     float &theta = parameters[0];
     float &scaleX = parameters[1];
     float &scaleY = parameters[2];
@@ -226,10 +227,10 @@ CUDAFUNCTION void parametersToHomography(nv_ext::Vec<Tp, D> &parameters,
 }
 
 CUDAFUNCTION inline void calcNewCoordH(float &h11, float &h12, float &h13,
-                   float &h21, float &h22, float &h23,
-                   float &h31, float &h32,
-                   int &x, int &y,
-                   float &new_x, float &new_y) {
+                                       float &h21, float &h22, float &h23,
+                                       float &h31, float &h32,
+                                       int &x, int &y,
+                                       float &new_x, float &new_y) {
     float new_w = ((h21 * h32 - h22 * h31) * x + (h12 * h31 - h11 * h32) * y + h11 * h22 - h12 * h21);
     new_x = ((h22 - h23 * h32) * x + (h13 * h32 - h12) * y + h12 * h23 - h13 * h22) / new_w;
     new_y = ((h23 * h31 - h21) * x + (h11 - h13 * h31) * y + h13 * h21 - h11 * h23) / new_w;
@@ -263,9 +264,11 @@ void homographyToParameters(float &h11, float &h12, float &h13,
     parameters[7] = keystoneY;
 }
 
-inline CUDAFUNCTION void parametricAssignValues(float &h11, float &h12, float &h13, float &h21, float &h22, float &h23, float &h31, float &h32,
-    int &m_width, int &m_height, int &f_width, int &f_height, int &row,
-    float &lambda_start, float &lambda_end, float &v_x, float &v_y, float &p0_x, float &p0_y, bool &inImage) {
+inline CUDAFUNCTION void
+parametricAssignValues(float &h11, float &h12, float &h13, float &h21, float &h22, float &h23, float &h31, float &h32,
+                       int &m_width, int &m_height, int &f_width, int &f_height, int &row,
+                       float &lambda_start, float &lambda_end, float &v_x, float &v_y, float &p0_x, float &p0_y,
+                       bool &inImage) {
 
     float D = h11*h22 - h12*h21 - h11*h23*h32 + h12*h23*h31 + h13*h21*h32 - h13*h22*h31;
     v_x = ((h22 - h32*row)*(D))/((h11*h22 - h12*h21 - h11*h32*row + h12*h31*row)*(h11*h22 - h12*h21 + f_width*h21*h32 - f_width*h22*h31 - h11*h32*row + h12*h31*row));
@@ -295,7 +298,7 @@ inline CUDAFUNCTION void parametricAssignValues(float &h11, float &h12, float &h
 
     if (x_bottom_ipt >= 0 && x_bottom_ipt < m_width && lambda_bottom >= 0 && lambda_bottom < f_width) {
         if (v_y < 0) {
-            lambda_start = lambda_bottom;        
+            lambda_start = lambda_bottom;
             inImage = true;
         } else {
             lambda_end = lambda_bottom;

@@ -350,6 +350,41 @@ __global__ void transformProcess(CudaTensor<precision, D> A,
     *(A._data + x) = transform(*(A._data + x), *(B._data + x));
 }
 
+template<typename pixType, uint32_t CHANNELS>
+__global__ void filterProcess(const CudaImage<float, 1> filter,
+                              const CudaImage<pixType, CHANNELS> imageIn,
+                              CudaImage<pixType, CHANNELS> imageOut,
+                              const enum CHANNEL_ACTION channel_actions[CHANNELS]) {
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int width = imageIn.width();
+    int height = imageIn.height();
+    if (col < width && row < height) {
+        float pixVal = 0;
+        int pixels = 0;
+        col -= (filter.width()-1) / 2;
+        row -= (filter.height()-1) / 2;
+        for (int channel = 0; channel < CHANNELS; ++channel) {
+            switch (channel_actions[channel]) {
+                case COPY:
+                    imageOut.template at<pixType>(row, col, channel) = imageIn.at(row, col, channel);
+                    break;
+                case FILTER:
+                default:
+                    for (int filterRow = 0; filterRow < filter.height() + 1; ++filterRow, ++row) {
+                        for (int filterCol = 0; filterCol < filter.width() + 1; ++filterCol, ++ col) {
+                            if (row > -1 && row < height && col > -1 && col < width) {
+                                pixVal += filter.at(filterRow,filterCol) * imageIn.at(row, col, channel);
+                                pixels++;
+                            }
+                            imageOut.template at<pixType>(row, col, channel) = (pixType) (pixVal / pixels);
+                        }
+                    }
+            }
+        }
+    }
+}
+
 template<typename precision, uint32_t blockSize>
 __global__ void
 multiplyProcess(const CudaMatrix<precision> A, const CudaMatrix<precision> B, CudaMatrix<precision> C) {

@@ -66,7 +66,7 @@
 #define PI 3.14159265
 
 #define grid_dimension 8        // the dimension of the grid, e.g., 1 => 1D grid, 2 => 2D grid, 3=> 3D grid, etc.
-#define CHANNELS 3
+#define CHANNELS 1
 typedef float grid_precision;   // the type of values in the grid, e.g., float, double, int, etc.
 typedef float func_precision;   // the type of values taken by the error function, e.g., float, double, int, etc.
 typedef uint8_t pixel_precision; // the type of values in the image, e.g., float, double, int, etc.
@@ -190,6 +190,13 @@ pixel_precision imageC_data[6 * 6] = {1, 1, 0, 0, 0, 0,
                                       0, 0, 0, 0, 0, 0
 };
 
+float avg_filter_5x5_data[5 * 5] = {1, 1, 1, 1, 1,
+                               1, 1, 1, 1, 1,
+                               1, 1, 1, 1, 1,
+                               1, 1, 1, 1, 1,
+                               1, 1, 1, 1, 1,
+};
+
 int main(int argc, char **argv) {
 
     // Argument parsing
@@ -301,6 +308,17 @@ int main(int argc, char **argv) {
 
     checkCudaErrors(cudaMalloc(&image_mov.data(), image_mov.bytesSize()));
     checkCudaErrors(cudaMemcpy(image_mov.data(), datam, image_mov.bytesSize(), cudaMemcpyHostToDevice));
+
+    CudaImage<float> avg_filter_5x5(5, 5);
+
+    checkCudaErrors(cudaMalloc(&avg_filter_5x5.data(), avg_filter_5x5.bytesSize()));
+
+    avg_filter_5x5.setValuesFromVector(std::vector<float>(avg_filter_5x5_data, avg_filter_5x5_data + 5 * 5));
+
+    CudaImage<uint8_t, CHANNELS> image_fix_filtered(yf, xf);
+    checkCudaErrors(cudaMalloc(&image_fix_filtered.data(), image_fix_filtered.bytesSize()));
+    CHANNEL_ACTION actions[CHANNELS] {FILTER};
+    image_fix.filter(avg_filter_5x5, image_fix_filtered, actions);
 
     CudaImage<uint8_t, CHANNELS> image_fix2(yf, xf);
     CudaImage<uint8_t, CHANNELS> image_mov2(ym, xm);

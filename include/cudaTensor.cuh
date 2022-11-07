@@ -42,6 +42,9 @@ class CudaTensor;
 template<typename precision>
 class CudaMatrix;
 
+template<typename precision, uint32_t CHANNELS>
+class CudaImage;
+
 // declare all CudaTensor __global__ kernel functions (in cudaTensorKernels.cuh) so they can be used in the CudaTensor
 // class template definition
 
@@ -55,6 +58,19 @@ template<typename precision, typename T, unsigned int D>
 __global__ void transformProcess(CudaTensor<precision, D> A,
                                  CudaTensor<precision, D> B,
                                  T transform);
+
+// CudaImage functions
+
+enum CHANNEL_ACTION {
+    COPY = 0,
+    FILTER = 1
+};
+
+template<typename precision, uint32_t CHANNELS>
+__global__ void filterProcess(const CudaImage<float, 1> filter,
+                              const CudaImage<precision, CHANNELS> imageIn,
+                              CudaImage<precision, CHANNELS> imageOut,
+                              const enum CHANNEL_ACTION channel_actions[CHANNELS]);
 
 template<typename precision, unsigned int D>
 __global__ void
@@ -556,6 +572,17 @@ struct CudaImage : public CudaTensor<precision, 3> {
             return value;
         }
         return (precision) OUTSIDE_IMAGE_VALUE;
+    }
+
+    CudaImage filter(const CudaImage<float,1> &filter, CudaImage &out, const enum CHANNEL_ACTION actions[CHANNELS]) {
+        // kernel call
+        dim3 blockSize(16, 16, 1);
+        dim3 gridSize(this->width() / blockSize.x, this->height() / blockSize.y, 1);
+        assert(this->_total_size == out._total_size);
+
+        filterProcess <<< gridSize, blockSize >>>(filter, *this, out, actions);
+
+        return out;
     }
 };
 
