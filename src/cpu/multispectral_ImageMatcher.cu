@@ -65,6 +65,8 @@
 
 #define PI 3.14159265
 
+#define DEBUG true
+
 #define grid_dimension 8        // the dimension of the grid, e.g., 1 => 1D grid, 2 => 2D grid, 3=> 3D grid, etc.
 #define CHANNELS 1
 typedef float grid_precision;   // the type of values in the grid, e.g., float, double, int, etc.
@@ -165,6 +167,7 @@ struct my_functor : Functor<float>
     }
 };
 */
+
 // test grid search
 // classes typically store images in column major format so the images
 // stored are the transpose of that shown in initialization below
@@ -190,11 +193,37 @@ pixel_precision imageC_data[6 * 6] = {1, 1, 0, 0, 0, 0,
                                       0, 0, 0, 0, 0, 0
 };
 
-float avg_filter_5x5_data[5 * 5] = {1, 1, 1, 1, 1,
-                               1, 1, 1, 1, 1,
-                               1, 1, 1, 1, 1,
-                               1, 1, 1, 1, 1,
-                               1, 1, 1, 1, 1,
+float delta_filter_data[1]={1.0f};
+
+#define F_D5x5 25.0f
+float avg_filter_5x5_data[5 * 5] = {1.0f / F_D5x5, 1.0f / F_D5x5, 1.0f / F_D5x5, 1.0f / F_D5x5, 1.0f / F_D5x5,
+                                    1.0f / F_D5x5, 1.0f / F_D5x5, 1.0f / F_D5x5, 1.0f / F_D5x5, 1.0f / F_D5x5,
+                                    1.0f / F_D5x5, 1.0f / F_D5x5, 1.0f / F_D5x5, 1.0f / F_D5x5, 1.0f / F_D5x5,
+                                    1.0f / F_D5x5, 1.0f / F_D5x5, 1.0f / F_D5x5, 1.0f / F_D5x5, 1.0f / F_D5x5,
+                                    1.0f / F_D5x5, 1.0f / F_D5x5, 1.0f / F_D5x5, 1.0f / F_D5x5, 1.0f / F_D5x5,
+};
+
+#define F_D10x10 100.0f
+float avg_filter_10x10_data[10 * 10] = {1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10,
+                                        1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10,
+                                        1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10,
+                                        1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10,
+                                        1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10,
+                                        1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10,
+                                        1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10,
+                                        1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10,
+                                        1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10,
+                                        1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10,
+                                        1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10,
+                                        1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10,
+                                        1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10,
+                                        1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10,
+                                        1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10,
+                                        1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10,
+                                        1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10,
+                                        1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10,
+                                        1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10,
+                                        1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10
 };
 
 int main(int argc, char **argv) {
@@ -309,16 +338,37 @@ int main(int argc, char **argv) {
     checkCudaErrors(cudaMalloc(&image_mov.data(), image_mov.bytesSize()));
     checkCudaErrors(cudaMemcpy(image_mov.data(), datam, image_mov.bytesSize(), cudaMemcpyHostToDevice));
 
+    CudaImage<float> delta_filter(1, 1);
+    checkCudaErrors(cudaMalloc(&delta_filter.data(), delta_filter.bytesSize()));
+    delta_filter.setValuesFromVector(std::vector<float>(delta_filter_data, delta_filter_data + 1 * 1));
+
     CudaImage<float> avg_filter_5x5(5, 5);
-
     checkCudaErrors(cudaMalloc(&avg_filter_5x5.data(), avg_filter_5x5.bytesSize()));
-
     avg_filter_5x5.setValuesFromVector(std::vector<float>(avg_filter_5x5_data, avg_filter_5x5_data + 5 * 5));
-    avg_filter_5x5.display("avg_filter_5x5");
+    // avg_filter_5x5.display("avg_filter_5x5");
+
+    CudaImage<float> avg_filter_10x10(10, 10);
+    checkCudaErrors(cudaMalloc(&avg_filter_10x10.data(), avg_filter_10x10.bytesSize()));
+    avg_filter_10x10.setValuesFromVector(std::vector<float>(avg_filter_10x10_data, avg_filter_10x10_data + 10 * 10));
+
     CudaImage<uint8_t, CHANNELS> image_fix_filtered(yf, xf);
     checkCudaErrors(cudaMalloc(&image_fix_filtered.data(), image_fix_filtered.bytesSize()));
     CHANNEL_ACTION actions[CHANNELS] {FILTER};
-    image_fix.filter(avg_filter_5x5, image_fix_filtered, actions);
+
+    // image_fix.filter(delta_filter, image_fix_filtered, actions);
+    // image_fix.filter(avg_filter_5x5, image_fix_filtered, actions);
+    image_fix.filter(avg_filter_10x10, image_fix_filtered, actions);
+
+    if (DEBUG) {
+        // Write an output image to disk
+        float identityH_data[] = {1.0f, 0.0f, 0.0f,
+                                  0.0f, 1.0f, 0.0f,
+                                  0.0f, 0.0f};
+        nv_ext::Vec<float, 8> identityH(identityH_data);
+        writeTransformedImageToDisk<uint8_t, CHANNELS>(image_fix, yf, xf, identityH, "image_fixed.png");
+        writeTransformedImageToDisk<uint8_t, CHANNELS>(image_fix_filtered, yf, xf, identityH,
+                                                       "image_fixed_filtered.png");
+    }
 
     CudaImage<uint8_t, CHANNELS> image_fix2(yf, xf);
     CudaImage<uint8_t, CHANNELS> image_mov2(ym, xm);
@@ -353,13 +403,13 @@ int main(int argc, char **argv) {
     // Example MI
     scaleX = 1;
     scaleY = 1;
-    float MAX_NONOVERLAPPING_PCT = 2.0;
-    std::vector<grid_precision> start_point = {(grid_precision) 0, // theta
+    float MAX_NONOVERLAPPING_PCT = 0.5f;
+    std::vector<grid_precision> start_point = {(grid_precision) -PI / 40, // theta
                                                (grid_precision) 0.7, // scaleX
                                                (grid_precision) 0.7, // scaleY
                                                (grid_precision) -0.4,  // shearXY
-                                               (grid_precision) -xm / MAX_NONOVERLAPPING_PCT,  // translateX
-                                               (grid_precision) -ym / MAX_NONOVERLAPPING_PCT,  // translateY
+                                               (grid_precision) -xm * MAX_NONOVERLAPPING_PCT,  // translateX
+                                               (grid_precision) -ym * MAX_NONOVERLAPPING_PCT,  // translateY
                                                (grid_precision) 0, // keystoneX
                                                (grid_precision) 0  // keystoneY
     };
@@ -378,8 +428,8 @@ int main(int argc, char **argv) {
                                              (grid_precision) 1.3,
                                              (grid_precision) 1.3,
                                              (grid_precision) 0.2,
-                                             (grid_precision) xf - xm / MAX_NONOVERLAPPING_PCT,
-                                             (grid_precision) yf - ym / MAX_NONOVERLAPPING_PCT,
+                                             (grid_precision) xf - xm * MAX_NONOVERLAPPING_PCT,
+                                             (grid_precision) yf - ym * MAX_NONOVERLAPPING_PCT,
                                              (grid_precision) 0,
                                              (grid_precision) 0
     };

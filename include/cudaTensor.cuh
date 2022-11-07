@@ -487,7 +487,7 @@ struct CudaMatrix : public CudaTensor<precision, 2> {
     static void multiply(const CudaMatrix &A, const CudaMatrix &B, CudaMatrix &C) {
         const uint32_t threadsPerBlock = 4;
         dim3 threads(threadsPerBlock, threadsPerBlock);
-        dim3 grid((threadsPerBlock + C.width() - 1) / threads.x, (threadsPerBlock + C.height() - 1) / threads.y);
+        dim3 grid(( C.width() + threadsPerBlock - 1) / threads.x, (C.height() + threadsPerBlock - 1) / threads.y);
 
         assert(A.width() == B.height());
         assert(C.height() == A.height());
@@ -577,7 +577,7 @@ struct CudaImage : public CudaTensor<precision, 3> {
     CudaImage filter(const CudaImage<float,1> &filter, CudaImage &out, const enum CHANNEL_ACTION actions[CHANNELS]) {
         // kernel call
         dim3 blockSize(16, 16, 1);
-        dim3 gridSize(this->width() / blockSize.x, this->height() / blockSize.y, 1);
+        dim3 gridSize((this->width() + blockSize.x - 1) / blockSize.x, (this->height() + blockSize.y - 1) / blockSize.y, 1);
         assert(this->_total_size == out._total_size);
         const enum CHANNEL_ACTION *actions_dev;
 //        checkCudaErrors(

@@ -357,11 +357,12 @@ __global__ void filterProcess(const CudaImage<float, 1> filter,
                               const enum CHANNEL_ACTION channel_actions[CHANNELS]) {
     int col = blockIdx.x * blockDim.x + threadIdx.x;
     int row = blockIdx.y * blockDim.y + threadIdx.y;
-    int width = imageIn.width();
-    int height = imageIn.height();
-    if (col < width && row < height) {
+    int crow = row;
+    int ccol = col;
+    int imWidth = imageIn.width();
+    int imHeight = imageIn.height();
+    if (col < imWidth && row < imHeight) {
         float pixVal = 0;
-        int pixels = 0;
         for (int channel = 0; channel < CHANNELS; ++channel) {
             switch (channel_actions[channel]) {
                 case COPY:
@@ -373,13 +374,19 @@ __global__ void filterProcess(const CudaImage<float, 1> filter,
                     row -= (filter.height()-1) / 2;
                     for (int filterRow = 0; filterRow < filter.height(); ++filterRow, ++row) {
                         for (int filterCol = 0; filterCol < filter.width(); ++filterCol, ++col) {
-                            if (row > -1 && row < height && col > -1 && col < width) {
+                            if (imageIn.inImage(row, col)) {
                                 pixVal += filter.at(filterRow,filterCol) * imageIn.at(row, col, channel);
-                                pixels++;
+                            } else {
+                                // TODO: Improve edge filtering options {MIRROR, MIRROR_SKIP, CONSTANT, CLAMP, NULL}
+                                // for now take center pixel as default off-screen value
+                                pixVal += filter.at(filterRow,filterCol) * imageIn.at(crow, ccol, channel);
                             }
-                            imageOut.template at<pixType>(row, col, channel) = (pixType) (pixVal / pixels);
                         }
+                        col -= filter.width();
                     }
+                    col += (filter.width()-1) / 2;
+                    row += (filter.height()-1) / 2 - filter.height();
+                    imageOut.template at<pixType>(row, col, channel) = (pixType) pixVal;
                     break;
             }
         }
