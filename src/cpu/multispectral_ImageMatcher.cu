@@ -203,6 +203,10 @@ float avg_filter_5x5_data[5 * 5] = {1.0f / F_D5x5, 1.0f / F_D5x5, 1.0f / F_D5x5,
                                     1.0f / F_D5x5, 1.0f / F_D5x5, 1.0f / F_D5x5, 1.0f / F_D5x5, 1.0f / F_D5x5,
 };
 
+float central_diff_5[5] = {
+        1.0f / 12.0f, -2.0f / 3.0f, 0.0f , 2.0f / 3.0f, -1.0f / 12.0f
+};
+
 #define F_D10x10 100.0f
 float avg_filter_10x10_data[10 * 10] = {1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10,
                                         1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10,
@@ -225,6 +229,30 @@ float avg_filter_10x10_data[10 * 10] = {1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f /
                                         1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10,
                                         1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10
 };
+
+void display_data(float *a, int ax, int ay) {
+    for (int y = 0; y < ay; y++) {
+        for (int x = 0; x < ax; x++) {
+            std::cout << a[x + y * ax] << ", ";
+        }
+        std::cout << std::endl;
+    }
+}
+
+void conv2_data(float *a, int ax, int ay, float *h, int hx, int hy, float *c) {
+    int ax0, ay0, hx0, hy0;
+    for (ax0 = 0; ax0 < ax; ax0++) {
+        for (ay0 = 0; ay0 < ay; ay0++) {
+            for (hx0 = 0; hx0 < hx; hx0++) {
+                for (hy0 = 0; hy0 < hy; hy0++) {
+                    if (ax0 - hx0 >= 0 && ax0 - hx0 < ax && ay0-hy0 >= 0 && ay0-hy0 < ay) {
+                        c[ax0 + ay0 * ax] += h[hx0 + hy0 * hx] + a[(ax0 - hx0) + (ay0 - hy0) * ax];
+                    }
+                }
+            }
+        }
+    }
+}
 
 int main(int argc, char **argv) {
 
@@ -350,6 +378,19 @@ int main(int argc, char **argv) {
     CudaImage<float> avg_filter_10x10(10, 10);
     checkCudaErrors(cudaMalloc(&avg_filter_10x10.data(), avg_filter_10x10.bytesSize()));
     avg_filter_10x10.setValuesFromVector(std::vector<float>(avg_filter_10x10_data, avg_filter_10x10_data + 10 * 10));
+
+    float zeros_5x5[5*5] =  { 0 };
+    float sobel_5x5[5*5] =  { 0 };
+    // set element [2,0] to 1
+    zeros_5x5[2*5+0] = 1.0f;
+    display_data(zeros_5x5, 5, 5);
+    conv2_data(zeros_5x5, 5, 5, central_diff_5, 5, 1, sobel_5x5);
+    zeros_5x5[2*5+0] = 0.0f;
+    zeros_5x5[0*5+2] = 1.0f;
+    display_data(zeros_5x5, 5, 5);
+    conv2_data(zeros_5x5, 5, 5, central_diff_5, 1, 5, sobel_5x5);
+    zeros_5x5[0*5+2] = 0.0f;
+    display_data(sobel_5x5, 5, 5);
 
     CudaImage<uint8_t, CHANNELS> image_fix_filtered(yf, xf);
     checkCudaErrors(cudaMalloc(&image_fix_filtered.data(), image_fix_filtered.bytesSize()));
