@@ -316,11 +316,13 @@ int main(int argc, char **argv) {
     float MAX_SIZE_DISCREPANCY = 1.5;
     int x_new, y_new;
     uint8_t *data_new;
+    float scale_factor_x = 1;
+    float scale_factor_y = 1;
     if (xf * yf > MAX_SIZE_DISCREPANCY * xm * ym) { // resize fixed image
         x_new = xm;
         y_new = ym;
-        float scale_factor_x = xm / xf;
-        float scale_factor_y = ym / yf;
+        scale_factor_x = (float)xm / (float)xf;
+        scale_factor_y = (float)ym / (float)yf;
 
         std::cerr << "Rescaling " + img_fixed_filename + " from " << "(" << xf << "," << yf << ")" << " to "
                   << "(" << x_new << "," << y_new << ")" << std::endl;
@@ -356,7 +358,7 @@ int main(int argc, char **argv) {
     }
     // number of components must be equal on construction
     // assert(nf == CHANNELS && nm == CHANNELS); // Does not work if using gray scale, nf/nm are based on original channels
-
+    outfile << "Scale Factor," << scale_factor_x << "," << scale_factor_y << ",";
     CudaImage<uint8_t, CHANNELS> image_fix(yf, xf);
     CudaImage<uint8_t, CHANNELS> image_mov(ym, xm);
 
@@ -455,8 +457,8 @@ int main(int argc, char **argv) {
     scaleY = 1;
     float MAX_NONOVERLAPPING_PCT = 0.5f;
     std::vector<grid_precision> start_point = {(grid_precision) -PI / 40, // theta
-                                               (grid_precision) 0.7, // scaleX
-                                               (grid_precision) 0.7, // scaleY
+                                               (grid_precision) 1.5 * scale_factor_x, // scaleX
+                                               (grid_precision) 1.5 * scale_factor_y, // scaleY
                                                (grid_precision) -0.4,  // shearXY
                                                (grid_precision) -xm * MAX_NONOVERLAPPING_PCT,  // translateX
                                                (grid_precision) -ym * MAX_NONOVERLAPPING_PCT,  // translateY
@@ -468,15 +470,15 @@ int main(int argc, char **argv) {
                                                (grid_precision) 16,
                                                (grid_precision) 16,
                                                (grid_precision) 5,
-                                               (grid_precision) (xf + 1) / 30,
-                                               (grid_precision) (yf + 1) / 30,
+                                               (grid_precision) (xf + 1) / (20 * scale_factor_x),
+                                               (grid_precision) (yf + 1) / (20 * scale_factor_y),
                                                (grid_precision) 1,
                                                (grid_precision) 1
     };
 
     std::vector<grid_precision> end_point = {static_cast<float>((grid_precision) 2 * PI - PI / num_samples[0]),
-                                             (grid_precision) 1.3,
-                                             (grid_precision) 1.3,
+                                             (grid_precision) 5 * scale_factor_x,
+                                             (grid_precision) 5 * scale_factor_y,
                                              (grid_precision) 0.2,
                                              (grid_precision) xf - xm * MAX_NONOVERLAPPING_PCT,
                                              (grid_precision) yf - ym * MAX_NONOVERLAPPING_PCT,
@@ -589,6 +591,7 @@ int main(int argc, char **argv) {
                     h31, h32};
     outfile << "Homography,";
     for (int i = 0; i < grid_dimension; i++) outfile << minH[i] << ",";
+    outfile << "\n";
 //    nv_ext::Vec<float, 8> H(initialH);
     nv_ext::Vec<float, 8> H(minH);
 
