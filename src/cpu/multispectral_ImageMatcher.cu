@@ -245,8 +245,8 @@ void conv2_data(float *a, int ax, int ay, float *h, int hx, int hy, float *c) {
         for (ay0 = 0; ay0 < ay; ay0++) {
             for (hx0 = 0; hx0 < hx; hx0++) {
                 for (hy0 = 0; hy0 < hy; hy0++) {
-                    if (ax0 - hx0 >= 0 && ax0 - hx0 < ax && ay0-hy0 >= 0 && ay0-hy0 < ay) {
-                        c[ax0 + ay0 * ax] += h[hx0 + hy0 * hx] + a[(ax0 - hx0) + (ay0 - hy0) * ax];
+                    if (ax0 - hx0 >= 0 && ax0 - hx0 < ax && ay0 - hy0 >= 0 && ay0 - hy0 < ay) {
+                        c[ax0 + ay0 * ax] += h[hx0 + hy0 * hx] * a[(ax0 - hx0) + (ay0 - hy0) * ax];
                     }
                 }
             }
@@ -385,12 +385,20 @@ int main(int argc, char **argv) {
     zeros_5x5[2*5+0] = 1.0f;
     display_data(zeros_5x5, 5, 5);
     conv2_data(zeros_5x5, 5, 5, central_diff_5, 5, 1, sobel_5x5);
+    display_data(sobel_5x5, 5, 5);
     zeros_5x5[2*5+0] = 0.0f;
     zeros_5x5[0*5+2] = 1.0f;
     display_data(zeros_5x5, 5, 5);
     conv2_data(zeros_5x5, 5, 5, central_diff_5, 1, 5, sobel_5x5);
     zeros_5x5[0*5+2] = 0.0f;
     display_data(sobel_5x5, 5, 5);
+    for (int idx=0; idx < 5; idx++) {
+        sobel_5x5[idx + idx * 5] += central_diff_5[idx];
+    }
+    display_data(sobel_5x5, 5, 5);
+    CudaImage<float> sobel_filter_5x5(10, 10);
+    checkCudaErrors(cudaMalloc(&sobel_filter_5x5.data(), sobel_filter_5x5.bytesSize()));
+    sobel_filter_5x5.setValuesFromVector(std::vector<float>(sobel_5x5, sobel_5x5 + 5 * 5));
 
     CudaImage<uint8_t, CHANNELS> image_fix_filtered(yf, xf);
     checkCudaErrors(cudaMalloc(&image_fix_filtered.data(), image_fix_filtered.bytesSize()));
@@ -399,6 +407,7 @@ int main(int argc, char **argv) {
     // image_fix.filter(delta_filter, image_fix_filtered, actions);
     // image_fix.filter(avg_filter_5x5, image_fix_filtered, actions);
     image_fix.filter(avg_filter_10x10, image_fix_filtered, actions);
+    // image_fix.filter(sobel_filter_5x5, image_fix_filtered, actions);
 
     if (DEBUG) {
         // Write an output image to disk
