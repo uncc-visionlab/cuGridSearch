@@ -103,6 +103,7 @@ __device__ image_err_func_byvalue dev_func_byvalue_ptr = calcMIAlt<func_precisio
 void cxxopts_integration(cxxopts::Options &options) {
 
     options.add_options()
+            ("gt", "Ground Truth CSV file", cxxopts::value<std::string>())
             ("i_ref", "Reference Image (image in the reference coordinate frame)", cxxopts::value<std::string>())
             ("i_mov", "Moved Image (image in the measured coordinate frame)", cxxopts::value<std::string>())
             ("d,debug", "Enable debugging", cxxopts::value<bool>()->default_value("false"))
@@ -260,7 +261,10 @@ int main(int argc, char **argv) {
     cxxopts::Options options("cuda_gridsearch", "UNC Charlotte Machine Vision Lab CUDA-accelerated grid search code.");
     cxxopts_integration(options);
     auto result = options.parse(argc, argv);
-    std::string img_fixed_filename, img_moved_filename, img_out_filename, img_fused_filename;
+    std::string gt_filename, img_fixed_filename, img_moved_filename, img_out_filename, img_fused_filename;
+    if (result.count("gt")) {
+        gt_filename = result["gt"].as<std::string>();
+    }
     if (result.count("i_ref")) {
         img_fixed_filename = result["i_ref"].as<std::string>();
     } else {
@@ -591,15 +595,56 @@ int main(int argc, char **argv) {
                     h31, h32};
     outfile << "Homography,";
     for (int i = 0; i < grid_dimension; i++) outfile << minH[i] << ",";
+    
+    float tempGTH[] = {h11, h12, h13, h21, h22, h23, h31, h32};
+    std::ifstream gtFile(gt_filename.c_str());
+    // Check if gtFile exists
+    if(gtFile.is_open()) {
+        // Extract image number from filename (should be the final part of the name)
+        char imgNumChar[5] = {' '};
+        size_t numIdx = img_fixed_filename.find_last_not_of("0123456789.png");
+        numIdx += 1;
+        int imgNumCharIdx = 0;
+        while(img_fixed_filename[numIdx] != '.')
+            imgNumChar[imgNumCharIdx++] = img_fixed_filename[numIdx++];
+        int imgNum = atoi(imgNumChar);
+        
+        // Get the line in the csv that has the matching image number
+        std::string line;
+        while(std::getline(gtFile, line)) {
+            size_t comma_idx = line.find_first_of(",");
+            std::string sTemp = line.substr(0,comma_idx);
+            int tempImgNum = atoi(sTemp.c_str());
+
+            if(tempImgNum == imgNum) {
+                // Found line, extract GT values (Homography 8 param)
+                // printf("Found image number match: %s\n", line.c_str());
+                comma_idx += 1;
+                for(int i = 0; i < 8; i++) {
+                    size_t comma_idx2 = line.find(",",comma_idx);
+                    sTemp = line.substr(comma_idx, comma_idx2);
+                    tempGTH[i] = std::stof(line.substr(comma_idx, comma_idx2));
+                    comma_idx = ++comma_idx2;
+                }
+                break;
+            }
+        }
+        for(int i = 0; i < 3; i++) tempGTH[i] *= scale_factor_x;
+        for(int i = 3; i < 6; i++) tempGTH[i] *= scale_factor_y;
+    }
+    outfile << "GT Homography,";
+    for (int i = 0; i < grid_dimension; i++) outfile << tempGTH[i] << ",";
+    outfile << "%% Error,";
+    for (int i = 0; i < grid_dimension; i++) outfile <<(minH[i] - tempGTH[i]) / tempGTH[i] << ",";
     outfile << "\n";
 //    nv_ext::Vec<float, 8> H(initialH);
     nv_ext::Vec<float, 8> H(minH);
-
+    nv_ext::Vec<float, 8> gtH(tempGTH);
     // Write an output image to disk
     writeTransformedImageToDisk<uint8_t, CHANNELS>(image_mov, yf, xf, H, img_out_filename);
 
     // Write aligned and fused output image to disk
-    writeAlignedAndFusedImageToDisk<uint8_t, CHANNELS>(image_fix, image_mov, H, H, img_fused_filename);
+    writeAlignedAndFusedImageToDisk<uint8_t, CHANNELS>(image_fix, image_mov, H, gtH, img_fused_filename);
 
     // Clean memory
     checkCudaErrors(cudaFree(image_fix.data()));
