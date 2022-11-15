@@ -30,3 +30,4 @@ add_executable(multispectral_ImageMatcher
         multispectral_ImageMatcher.cu)
 #target_compile_options(cpuNonLinearOptimizer PUBLIC --extended-lambda --expt-relaxed-constexpr)
 target_link_libraries(multispectral_ImageMatcher -no-pie Eigen3::Eigen cugridsearch)
+target_compile_options(multispectral_ImageMatcher PRIVATE -Xcudafe --diag_suppress=20012)

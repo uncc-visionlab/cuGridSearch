@@ -17,41 +17,27 @@
 
 /* system header */
 
+#define EIGEN_DEFAULT_DENSE_INDEX_TYPE int
+#include <Eigen/Dense>
 
-// #include <Eigen/Dense>
-
-// #include <unsupported/Eigen/NonLinearOptimization>
-// #include <unsupported/Eigen/NumericalDiff>
+#include <unsupported/Eigen/NonLinearOptimization>
+#include <unsupported/Eigen/NumericalDiff>
 
 #include <cmath>
 #include <iostream>
-#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <vector>
-#include <fstream>
 #include <chrono>
 
 /* nVIDIA CUDA header */
-//#include <cuda.h>
 
 #include "third_party/cxxopts.hpp"
 
-//#define CUDAFUNCTION
-//#define CUDAFUNCTION __host__ __device__
-//
-//#include "helper_functions.h"
-//#include "helper_cuda.h"
 #include "cuGridSearch.cuh"
-//#include "cudaTensor.cuh"
-//
-//#include "../gpu/cudaGridSearch.cuh"
-//#include "../gpu/cudaErrorFunctions.cuh"
+
 #include "../gpu/cudaErrorFunction_mi.cuh"
-//#include "../gpu/cudaErrorFunctionsStreams.cuh"
-//#include "../gpu/cudaErrorFunction_miStreams.cuh"
-#include "../gpu/cudaImageFunctions.cuh"
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_FAILURE_USERMSG
@@ -124,7 +110,7 @@ void printMatrix(double **matrix, int ROWS, int COLUMNS) {
     }
 }
 
-/*
+
 // Generic functor
 template<typename _Scalar, int NX = Eigen::Dynamic, int NY = Eigen::Dynamic>
 struct Functor
@@ -147,10 +133,10 @@ struct Functor
     int values() const { return m_values; }
 
 };
-*/
+
 CudaImage<uint8_t, CHANNELS> *image_fix_test;
 CudaImage<uint8_t, CHANNELS> *image_mov_test;
-/*
+
 struct my_functor : Functor<float>
 {
     my_functor(void): Functor<float>(grid_dimension,grid_dimension) {}
@@ -161,13 +147,13 @@ struct my_functor : Functor<float>
             minParams[i] = x(i);
         nv_ext::Vec<float, grid_dimension> minParamsVec(minParams);
 
-        fvec(0) = sqrt(calcNCCAlt<func_precision, grid_precision, grid_dimension, CHANNELS, pixel_precision>(minParamsVec, *image_fix_test, *image_mov_test));
+//        fvec(0) = sqrt(calcNCCAlt<func_precision, grid_precision, grid_dimension, CHANNELS, pixel_precision>(minParamsVec, *image_fix_test, *image_mov_test));
         for (int i = 1; i < grid_dimension; i++)
             fvec(i) = 0;
         return 0;
     }
 };
-*/
+
 
 // test grid search
 // classes typically store images in column major format so the images
@@ -340,12 +326,14 @@ int main(int argc, char **argv) {
         yf = y_new;
         stbi_image_free(dataf);
         dataf = data_new;
-        stbi_write_png("resized_image.png", x_new, y_new, CHANNELS, data_new,
+        stbi_write_png("image_fixed_resized.png", x_new, y_new, CHANNELS, data_new,
                        x_new * sizeof(uint8_t) * CHANNELS);
     } else if (xm * ym > MAX_SIZE_DISCREPANCY * xf * yf) {
         x_new = xf;
         y_new = yf;
-        std::cerr << "Rescaling " + img_moved_filename + " from " << "(" << xf << "," << yf << ")" << " to "
+        scale_factor_x = (float)xf / (float)xm;
+        scale_factor_y = (float)yf / (float)ym;
+        std::cerr << "Rescaling " + img_moved_filename + " from " << "(" << xm << "," << ym << ")" << " to "
                   << "(" << x_new << "," << y_new << ")" << std::endl;
         data_new = (uint8_t *) malloc(x_new * y_new * CHANNELS);
         stbir_resize_uint8(datam, xm, ym, 0, data_new, x_new, y_new, 0, CHANNELS);
@@ -357,7 +345,7 @@ int main(int argc, char **argv) {
         ym = y_new;
         stbi_image_free(datam);
         datam = data_new;
-        stbi_write_png("resized_image.png", x_new, y_new, CHANNELS, data_new,
+        stbi_write_png("image_moved_resized.png", x_new, y_new, CHANNELS, data_new,
                        x_new * sizeof(uint8_t) * CHANNELS);
     }
     // number of components must be equal on construction
@@ -460,16 +448,6 @@ int main(int argc, char **argv) {
     scaleX = 1;
     scaleY = 1;
     float MAX_NONOVERLAPPING_PCT = 0.5f;
-    std::vector<grid_precision> start_point = {(grid_precision) -PI / 40, // theta
-                                               (grid_precision) 1.5 * scale_factor_x, // scaleX
-                                               (grid_precision) 1.5 * scale_factor_y, // scaleY
-                                               (grid_precision) -0.4,  // shearXY
-                                               (grid_precision) -xm * MAX_NONOVERLAPPING_PCT,  // translateX
-                                               (grid_precision) -ym * MAX_NONOVERLAPPING_PCT,  // translateY
-                                               (grid_precision) 0, // keystoneX
-                                               (grid_precision) 0  // keystoneY
-    };
-
     std::vector<grid_precision> num_samples = {(grid_precision) 32,
                                                (grid_precision) 16,
                                                (grid_precision) 16,
@@ -478,6 +456,16 @@ int main(int argc, char **argv) {
                                                (grid_precision) (yf + 1) / (20 * scale_factor_y),
                                                (grid_precision) 1,
                                                (grid_precision) 1
+    };
+
+    std::vector<grid_precision> start_point = {(grid_precision) 0, // theta
+                                               (grid_precision) 1.5 * scale_factor_x, // scaleX
+                                               (grid_precision) 1.5 * scale_factor_y, // scaleY
+                                               (grid_precision) -0.4,  // shearXY
+                                               (grid_precision) -xm * MAX_NONOVERLAPPING_PCT,  // translateX
+                                               (grid_precision) -ym * MAX_NONOVERLAPPING_PCT,  // translateY
+                                               (grid_precision) 0, // keystoneX
+                                               (grid_precision) 0  // keystoneY
     };
 
     std::vector<grid_precision> end_point = {static_cast<float>((grid_precision) 2 * PI - PI / num_samples[0]),
