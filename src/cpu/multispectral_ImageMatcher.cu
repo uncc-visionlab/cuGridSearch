@@ -582,8 +582,13 @@ int main(int argc, char **argv) {
                     h21, h22, h23,
                     h31, h32};
     outfile << "Homography,";
-    for (int i = 0; i < grid_dimension; i++) outfile << minH[i] << ",";
-    
+    std::cout << "Answer[";
+    for (int i = 0; i < grid_dimension; i++) {
+        outfile << minH[i] << ",";
+        std::cout << minH[i] << ((i < grid_dimension - 1) ? "," : "");
+    }
+    std::cout << "]" << std::endl;
+
     float tempGTH[] = {h11, h12, h13, h21, h22, h23, h31, h32};
     std::ifstream gtFile(gt_filename.c_str());
     // Check if gtFile exists
