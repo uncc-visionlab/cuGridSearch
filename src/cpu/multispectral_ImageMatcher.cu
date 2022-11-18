@@ -589,6 +589,8 @@ int main(int argc, char **argv) {
     }
     std::cout << "]" << std::endl;
 
+    std::cout << "Scale_factor[" << scale_factor_x << "," << scale_factor_y << "]" << std::endl;
+
     float tempGTH[] = {h11, h12, h13, h21, h22, h23, h31, h32};
     std::ifstream gtFile(gt_filename.c_str());
     // Check if gtFile exists
