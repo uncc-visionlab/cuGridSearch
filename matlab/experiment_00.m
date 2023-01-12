@@ -4,7 +4,7 @@ clc;
 % Change these file paths to match your path setup
 dataFolder_fusedng = fullfile('/home','server', 'SAR', 'geo_dataset','Concord', 'moving');
 dataFolder_reference = fullfile('/home','server', 'SAR', 'geo_dataset','Concord', 'fixed');
-dataFolder_fused_output = fullfile('/home','arwillis', 'tmp');
+dataFolder_fused_output = fullfile('/home','arwillis', 'geo_dataset_exp');
 
 % dataFolder_moving = fullfile('..','src','gpu', 'testImages','reg','sar');
 % dataFolder_reference = fullfile('..','src','gpu', 'testImages','reg','gmap');
@@ -21,8 +21,10 @@ image_ref='';
 image_mov='';
 
 estH_list = [];
+new_gtH = [];
 scale_list = [];
 runtime_list = [];
+
 for fileIdx=1:length(imds_moving.Files)
     time_start = tic;
     image_ref=imds_reference.Files(fileIdx);
@@ -44,6 +46,18 @@ for fileIdx=1:length(imds_moving.Files)
     estH_list = [estH_list; estH];
     scale_list = [scale_list; scale_factor];
     runtime_list = [runtime_list; runtime];
+    
+    Hvals = table2array(gt_data(fileIdx,18:26));
+    gt_H = reshape(Hvals, 3,3)';
+    scale = scale_list(fileIdx, :);
+    S = [scale(1) 0 0; 0 scale(2) 0; 0 0 1];
+    % Formula: B' = (S * H * S^-1) * S * A
+    resized_gtH = S * gt_H;
+    temp_gtH = reshape(resized_gtH', 1,[]);
+    new_gtH = [new_gtH; temp_gtH];
+    est_H1 = reshape(estH, 3,3)';
+    
+    aaa = 1;
 end
 
 
