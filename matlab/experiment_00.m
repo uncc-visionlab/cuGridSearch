@@ -2,18 +2,21 @@ clear;
 clc;
 
 % Change these file paths to match your path setup
-dataFolder_moving = fullfile('..','..', 'geo_dataset','Concord','moving');
-dataFolder_reference = fullfile('..','..', 'geo_dataset','Concord','fixed');
+dataFolder_fusedng = fullfile('/home','server', 'SAR', 'geo_dataset','Concord', 'moving');
+dataFolder_reference = fullfile('/home','server', 'SAR', 'geo_dataset','Concord', 'fixed');
+dataFolder_fused_output = fullfile('/home','arwillis', 'tmp');
+
 % dataFolder_moving = fullfile('..','src','gpu', 'testImages','reg','sar');
 % dataFolder_reference = fullfile('..','src','gpu', 'testImages','reg','gmap');
-gt_data = readtable(fullfile('..','..', 'geo_dataset','Concord','rosgeoregistration_2022_12_21_19_19_13.log'));
+gt_data = readtable(fullfile('/home','server', 'SAR', 'geo_dataset','Concord', 'rosgeoregistration_2022_12_21_19_19_13.log'));
 execute_binary='../cmake-build-debug/src/cpu/multispectral_ImageMatcher';
 
 imds_reference = imageDatastore(dataFolder_reference, 'IncludeSubfolders',true,'LabelSource','foldernames');
-imds_moving = imageDatastore(dataFolder_moving, 'IncludeSubfolders',true,'LabelSource','foldernames');
+imds_moving = imageDatastore(dataFolder_fusedng, 'IncludeSubfolders',true,'LabelSource','foldernames');
 
 arg_reference_image='--i_ref';
 arg_moving_image='--i_mov';
+arg_fused_output_image='-f';
 image_ref='';
 image_mov='';
 
@@ -24,9 +27,12 @@ for fileIdx=1:length(imds_moving.Files)
     time_start = tic;
     image_ref=imds_reference.Files(fileIdx);
     image_mov=imds_moving.Files(fileIdx);
+    indices=find('/' == image_ref{1});
+    image_out_fused = strcat(dataFolder_fused_output,'/',image_ref{1}(indices(end)+1:end-9),'fused.png');
     command=strcat(execute_binary," ", ...
         arg_reference_image," ",image_ref," ", ...
-        arg_moving_image," ",image_mov)
+        arg_moving_image," ",image_mov, " ", ...
+        arg_fused_output_image," ",image_out_fused)
     
     [status,cmdout] = system(command);
     % add output of homography to cuGridSearch
@@ -39,6 +45,8 @@ for fileIdx=1:length(imds_moving.Files)
     scale_list = [scale_list; scale_factor];
     runtime_list = [runtime_list; runtime];
 end
+
+
 
 new_gtH = [];
 for fileIdx=1:length(imds_moving.Files)
