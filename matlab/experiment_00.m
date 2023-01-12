@@ -2,10 +2,12 @@ clear;
 clc;
 
 % Change these file paths to match your path setup
-dataFolder_moving = fullfile('..','src','gpu', 'testImages','reg','sar');
-dataFolder_reference = fullfile('..','src','gpu', 'testImages','reg','gmap');
-gt_data = csvread('gt_dataset_homography.csv');
-execute_binary='../build/src/cpu/multispectral_ImageMatcher';
+dataFolder_moving = fullfile('..','..', 'geo_dataset','Concord','moving');
+dataFolder_reference = fullfile('..','..', 'geo_dataset','Concord','fixed');
+% dataFolder_moving = fullfile('..','src','gpu', 'testImages','reg','sar');
+% dataFolder_reference = fullfile('..','src','gpu', 'testImages','reg','gmap');
+gt_data = readtable(fullfile('..','..', 'geo_dataset','Concord','rosgeoregistration_2022_12_21_19_19_13.log'));
+execute_binary='../cmake-build-debug/src/cpu/multispectral_ImageMatcher';
 
 imds_reference = imageDatastore(dataFolder_reference, 'IncludeSubfolders',true,'LabelSource','foldernames');
 imds_moving = imageDatastore(dataFolder_moving, 'IncludeSubfolders',true,'LabelSource','foldernames');
