@@ -89,6 +89,7 @@ __device__ image_err_func_byvalue dev_func_byvalue_ptr = calcMIAlt<func_precisio
 void cxxopts_integration(cxxopts::Options &options) {
 
     options.add_options()
+            ("m,mod", "Intensity modifier", cxxopts::value<float>()->default_value("0"))
             ("gt", "Ground Truth CSV file", cxxopts::value<std::string>())
             ("i_ref", "Reference Image (image in the reference coordinate frame)", cxxopts::value<std::string>())
             ("i_mov", "Moved Image (image in the measured coordinate frame)", cxxopts::value<std::string>())
@@ -241,6 +242,66 @@ void conv2_data(float *a, int ax, int ay, float *h, int hx, int hy, float *c) {
     }
 }
 
+template<typename pixType>
+__global__ void transformVerify(CudaImage<pixType, CHANNELS> img, float mod) {
+    int xIdx = blockDim.x * blockIdx.x + threadIdx.x;
+    int yIdx = blockDim.y * blockIdx.y + threadIdx.y;
+
+    if(xIdx > img.width() || yIdx > img.height()) return;
+
+    for(int c = 0; c < CHANNELS; c++) {
+        // char pixel = img.at(yIdx, xIdx, c);
+        char pixel = img._data[img.toIndex(yIdx, xIdx, c)];
+        int temp = (int)pixel;
+        temp /= mod;
+        temp *= mod;
+        if(xIdx == 60 && yIdx == 50) {
+            printf("Pixel Value = %d\nChanged Value = %d\n", pixel, temp);
+        }
+    }
+}
+
+template<typename pixType>
+__global__ void transformPixel(CudaImage<pixType, CHANNELS> img, float mod) {
+    int xIdx = blockDim.x * blockIdx.x + threadIdx.x;
+    int yIdx = blockDim.y * blockIdx.y + threadIdx.y;
+
+    if(xIdx > img.width() || yIdx > img.height()) return;
+
+
+    // Grouping
+    for(int c = 0; c < CHANNELS; c++) {
+        // char pixel = img.at(yIdx, xIdx, c);
+        char pixel = img._data[img.toIndex(yIdx, xIdx, c)];
+        int temp = (int)pixel;
+        temp /= mod;
+        temp *= mod;
+        img._data[img.toIndex(yIdx, xIdx, c)] = (pixType)temp;
+    }
+
+    // // Sigmoid func
+    // for(int c = 0; c < CHANNELS; c++) {
+    //     char pixel = img.at(yIdx, xIdx, c);
+    //     float temp = (float)pixel;
+    //     temp /= 255.0f;
+    //     temp *= 12.0f;
+    //     temp = 1.0f / (1.0f + exp(-1 * mod * (temp - 6.0f)));
+    //     temp *= 255.0f;
+    //     img.template at<pixType>(yIdx, xIdx, c) = temp;
+    // }
+
+    // // Arcsine
+    // for(int c = 0; c < CHANNELS; c++) {
+    //     char pixel = img.at(yIdx, xIdx, c);
+    //     float temp = (float)pixel;
+    //     temp /= 255.0f;
+    //     temp *= 2.0f;
+    //     temp = (asin(mod*(temp - 1.0f)) + PI/2) / PI;
+    //     temp *= 255.0f;
+    //     img.template at<pixType>(yIdx, xIdx, c) = temp;
+    // }
+}
+
 int main(int argc, char **argv) {
 
     // Argument parsing
@@ -267,6 +328,8 @@ int main(int argc, char **argv) {
     }
     img_out_filename = result["output"].as<std::string>();
     img_fused_filename = result["fusedoutput"].as<std::string>();
+    float intensityModifier = result["mod"].as<float>();
+
     std::cerr << "Output image filename is " << img_out_filename << "." << std::endl;
     std::cerr << "Fused Output image filename is " << img_fused_filename << "." << std::endl;
     if (result.count("help")) {
@@ -308,6 +371,7 @@ int main(int argc, char **argv) {
     uint8_t *data_new;
     float scale_factor_x = 1;
     float scale_factor_y = 1;
+    /**/
     if (xf * yf > MAX_SIZE_DISCREPANCY * xm * ym) { // resize fixed image
         x_new = xm;
         y_new = ym;
@@ -348,6 +412,7 @@ int main(int argc, char **argv) {
         stbi_write_png("image_moved_resized.png", x_new, y_new, CHANNELS, data_new,
                        x_new * sizeof(uint8_t) * CHANNELS);
     }
+    /**/
     // number of components must be equal on construction
     // assert(nf == CHANNELS && nm == CHANNELS); // Does not work if using gray scale, nf/nm are based on original channels
     outfile << "Scale Factor," << scale_factor_x << "," << scale_factor_y << ",";
@@ -402,6 +467,13 @@ int main(int argc, char **argv) {
     // image_fix.filter(avg_filter_5x5, image_fix_filtered, actions);
     image_fix.filter(avg_filter_10x10, image_fix_filtered, actions);
     // image_fix.filter(sobel_filter_5x5, image_fix_filtered, actions);
+
+    if(intensityModifier > 0.0f) {
+        dim3 bSize(32,32);
+        dim3 gSize(image_mov.width()/32 + 1,image_mov.height()/32 + 1);
+        transformPixel<uint8_t><<<gSize,bSize>>>(image_mov, intensityModifier);
+        cudaDeviceSynchronize();
+    }
 
     if (DEBUG) {
         // Write an output image to disk
