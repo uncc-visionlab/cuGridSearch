@@ -7,6 +7,7 @@ NUM_FILES = 100000;
 %NUM_FILES = 2;
 USER_FOLDER = 'arwillis';
 ERROR_THRESHOLD = 0.18;
+INTENSITY_MODIFIER = "20";
 
 % Change these file paths to match your path setup
 % dataFolder_moving = fullfile('..','src','gpu', 'testImages','reg','sar');
@@ -40,19 +41,13 @@ for DATASET_INDEX=1:3
     imds_reference = imageDatastore(dataFolder_reference, 'IncludeSubfolders',true,'LabelSource','foldernames');
     imds_moving = imageDatastore(dataFolder_moving, 'IncludeSubfolders',true,'LabelSource','foldernames');
     
-    arg_reference_image='--i_ref';
-    arg_moving_image='--i_mov';
-    arg_fused_output_image='-f';
-    image_ref='';
-    image_mov='';
-    
     H_estimated_list = [];
     H_ground_truth_list = [];
     scale_list = [];
     runtime_list = [];
     corner_error_statistics = [];
     
-    f1_handle = figure('visible','off');
+    f1_handle = figure('Visible','off');
     
     skip = round(length(imds_moving.Files)/(NUM_FILES));
     if (skip == 0)
@@ -63,9 +58,8 @@ for DATASET_INDEX=1:3
         image_ref=imds_reference.Files(fileIdx);
         image_mov=imds_moving.Files(fileIdx);
         filename_path = regexp(image_ref,"(.*\/).*", "tokens");
-        filename_source = image_ref(length(filename_path{1}{1})+1:end);
+        filename_source = image_ref{1}(strlength(filename_path{1}{1})+1:end);
 
-        indices=find('/' == image_ref{1});
         image_out_fused = strcat(dataFolder_fused_output,'/',filename_source,'fused.png');
         
         %command=strcat(execute_binary, " ", ...
@@ -73,6 +67,7 @@ for DATASET_INDEX=1:3
         %    "--i_mov, " ", image_mov, " ", ...
         %    "-f", " ", image_out_fused)
         command=strcat(execute_binary, " ", ...
+            "-m", " ", INTENSITY_MODIFIER, " ", ...
             "--i_ref", " ", image_ref, " ", ...
             "--i_mov", " ", image_mov);
         
@@ -140,9 +135,11 @@ for DATASET_INDEX=1:3
         imwrite(I_fused_scaled, image_out_fused_estimated);
         
         set(0,'CurrentFigure',f1_handle);
-        %drawnow;
+        set(f1_handle, 'Visible', 'on');
         subplot(1,2,1), imshow(I_fused), title('Ground Truth');
         subplot(1,2,2), imshow(I_fused_scaled), title('Estimated');
+        drawnow;
+
         image_out_comp_fused = fullfile(dataFolder_compared_fused_output,strcat(basename,'fused_comp.png'));
         saveas(f1_handle, image_out_comp_fused)
         
