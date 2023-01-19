@@ -26,6 +26,7 @@ datafileGTName{2}='rosgeoregistration_2022_12_21_19_19_13.log';
 datasetName{3}='Isleta';
 datafileGTName{3}='rosgeoregistration_2022_12_21_21_28_42.log';
 
+dataset(1).date = date;
 for DATASET_INDEX=1:3
     
     dataFolder_dataset = fullfile('geo_dataset', datasetName{DATASET_INDEX});
@@ -185,9 +186,9 @@ for DATASET_INDEX=1:3
         dataset(DATASET_INDEX).match(fileIdx).avg_corner_normalized_error_mag = avg_corner_normalized_error_mag;
         dataset(DATASET_INDEX).match(fileIdx).runtime = runtime;
     end
-    dataset.date = date;
+    dataset(DATASET_INDEX).date = date;
 end
-experiment_filename_str = sprintf('image_matching_exp_results-%s.mat', dataset.date)
+experiment_filename_str = sprintf('image_matching_exp_results-%s.mat', dataset(1).date)
 save(experiment_filename_str,'dataset')
 
 function transformImage(I_src, I_dest, H)
