@@ -8,6 +8,16 @@ NUM_FILES = 100000;
 USER_FOLDER = 'arwillis';
 ERROR_THRESHOLD = 0.18;
 
+% Change these file paths to match your path setup
+% dataFolder_moving = fullfile('..','src','gpu', 'testImages','reg','sar');
+% dataFolder_reference = fullfile('..','src','gpu', 'testImages','reg','gmap');
+% Willis - UNIVERSITY SITE CONFIG
+%dataFolder_root = fullfile('/home', USER_FOLDER, 'CLionProjects', 'georeg_exps');
+%dataFolder_root = fullfile('/home','server', 'SAR');
+% Willis - HOME SITE CONFIG
+dataFolder_root = fullfile('/home', USER_FOLDER, 'CLionProjects', 'georeg_exps');
+dataFolder_results = fullfile('/home', USER_FOLDER,  'CLionProjects', 'georeg_exps', 'results');
+
 datasetName{1}='EPIC';
 datafileGTName{1}='rosgeoregistration_2022_12_21_23_38_22.log';
 datasetName{2}='Concord';
@@ -16,13 +26,6 @@ datasetName{3}='Isleta';
 datafileGTName{3}='rosgeoregistration_2022_12_21_21_28_42.log';
 
 for DATASET_INDEX=1:3
-    % Change these file paths to match your path setup
-    % Willis - UNIVERSITY SITE CONFIG
-    %dataFolder_root = fullfile('/home', USER_FOLDER, 'CLionProjects', 'georeg_exps');
-    %dataFolder_root = fullfile('/home','server', 'SAR');
-    % Willis - HOME SITE CONFIG
-    dataFolder_root = fullfile('/home', USER_FOLDER, 'CLionProjects', 'georeg_exps');
-    dataFolder_results = fullfile('/home', USER_FOLDER,  'CLionProjects', 'georeg_exps', 'results');
     
     dataFolder_dataset = fullfile('geo_dataset', datasetName{DATASET_INDEX});
     dataFolder_moving = fullfile(dataFolder_root, dataFolder_dataset, 'moving');
@@ -32,8 +35,6 @@ for DATASET_INDEX=1:3
     
     gt_data = readtable(fullfile(dataFolder_root, dataFolder_dataset, datafileGTName{DATASET_INDEX}));
     
-    % dataFolder_moving = fullfile('..','src','gpu', 'testImages','reg','sar');
-    % dataFolder_reference = fullfile('..','src','gpu', 'testImages','reg','gmap');
     execute_binary='../cmake-build-debug/src/cpu/multispectral_ImageMatcher';
     
     imds_reference = imageDatastore(dataFolder_reference, 'IncludeSubfolders',true,'LabelSource','foldernames');
@@ -59,22 +60,26 @@ for DATASET_INDEX=1:3
     end
     
     for fileIdx=1:skip:length(imds_moving.Files)
-        time_start = tic;
         image_ref=imds_reference.Files(fileIdx);
         image_mov=imds_moving.Files(fileIdx);
+        filename_path = regexp(image_ref,"(.*\/).*", "tokens");
+        filename_source = image_ref(length(filename_path{1}{1})+1:end);
+
         indices=find('/' == image_ref{1});
-        image_out_fused = strcat(dataFolder_fused_output,'/',image_ref{1}(indices(end)+1:end-9),'fused.png');
-        %command=strcat(execute_binary," ", ...
-        %    arg_reference_image," ",image_ref," ", ...
-        %    arg_moving_image," ",image_mov, " ", ...
-        %    arg_fused_output_image," ",image_out_fused)
-        command=strcat(execute_binary," ", ...
-            arg_reference_image," ",image_ref," ", ...
-            arg_moving_image," ",image_mov);
+        image_out_fused = strcat(dataFolder_fused_output,'/',filename_source,'fused.png');
         
-        [status,cmdout] = system(command);
-        % add output of homography to cuGridSearch
+        %command=strcat(execute_binary, " ", ...
+        %    "--i_ref", " ", image_ref, " ", ...
+        %    "--i_mov, " ", image_mov, " ", ...
+        %    "-f", " ", image_out_fused)
+        command=strcat(execute_binary, " ", ...
+            "--i_ref", " ", image_ref, " ", ...
+            "--i_mov", " ", image_mov);
+        
+        time_start = tic;
+        [status, cmdout] = system(command);
         runtime = toc(time_start);
+
         grid_values_str = regexp(cmdout,"\{(.*?)\}", "tokens");
         grid_values.start = str2num(grid_values_str{1}{1});
         grid_values.stop = str2num(grid_values_str{2}{1});
@@ -128,13 +133,14 @@ for DATASET_INDEX=1:3
         I_fused_scaled(:,:,2) = uint8(I_fixed_scaled(:,:,1));
         I_fused_scaled(:,:,3) = uint8(2*I_moving_scaled_estimated(:,:,1));
         
-        basename = image_ref{1}(indices(end)+1:end-9);
+        basename = filename_source(1:end-9);
         image_out_fused_ground_truth = fullfile(dataFolder_fused_output,strcat(basename,'fused_gt.png'));
         image_out_fused_estimated = fullfile(dataFolder_fused_output,strcat(basename,'fused_est.png'));
         imwrite(I_fused, image_out_fused_ground_truth);
         imwrite(I_fused_scaled, image_out_fused_estimated);
         
         set(0,'CurrentFigure',f1_handle);
+        %drawnow;
         subplot(1,2,1), imshow(I_fused), title('Ground Truth');
         subplot(1,2,2), imshow(I_fused_scaled), title('Estimated');
         image_out_comp_fused = fullfile(dataFolder_compared_fused_output,strcat(basename,'fused_comp.png'));
@@ -182,8 +188,10 @@ for DATASET_INDEX=1:3
         dataset(DATASET_INDEX).match(fileIdx).avg_corner_normalized_error_mag = avg_corner_normalized_error_mag;
         dataset(DATASET_INDEX).match(fileIdx).runtime = runtime;
     end
+    dataset.date = date;
 end
-save('exp_results.mat','dataset')
+experiment_filename_str = sprintf('image_matching_exp_results-%s.mat', dataset.date)
+save(experiment_filename_str,'dataset')
 
 function transformImage(I_src, I_dest, H)
     [rows_dest, cols_dest] = size(I_dest);
