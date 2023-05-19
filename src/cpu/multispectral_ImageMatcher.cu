@@ -38,6 +38,7 @@
 #include "cuGridSearch.cuh"
 
 #include "../gpu/cudaErrorFunction_mi.cuh"
+#include "../gpu/cudaErrorFunctions.cuh"
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_FAILURE_USERMSG
@@ -111,6 +112,147 @@ void printMatrix(double **matrix, int ROWS, int COLUMNS) {
     }
 }
 
+template<typename pixType, uint8_t D, uint8_t CHANNEL>
+__global__ void fuseAlignedImages_local(nv_ext::Vec<float, D> estimatedH,
+                                  nv_ext::Vec<float, D> trueH,
+                                  CudaImage<pixType, CHANNEL> imageReference,
+                                  CudaImage<pixType, CHANNEL> imageMoving,
+                                  CudaImage<pixType, 3> imageFused,
+                                  int fusedChannel = 0) {
+    int columns = imageFused.width();
+    int rows = imageFused.height();
+    float identityH_vals[] = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0};
+    nv_ext::Vec<float, D> identityH(identityH_vals);
+    nv_ext::Vec<float, D> H;
+    // Transform the image
+    for (int c = 0; c < 3; c++) {
+        switch (c) {
+            case 0:
+                H = estimatedH;
+                break;
+            case 1: //GREEN
+                H = identityH;
+                break;
+            case 2:
+                H = trueH;
+                break;
+        }
+        float &h11 = H[0], &h12 = H[1], &h13 = H[2], &h21 = H[3], &h22 = H[4], &h23 = H[5], &h31 = H[6], &h32 = H[7];
+        // for (int x = 0; x < columns; x++) {
+        //     for (int y = 0; y < rows; y++) {
+        for (float x = -0.5; x < 0.5; x += 1/((float)columns)) {
+            for (float y = -0.5; y < 0.5; y += 1/((float)rows)) {
+                //float denom = (h11*h22 - h12*h21 - h11*h23*h32 + h12*h23*h31 + h13*h21*h32 - h13*h22*h31);
+                float new_w = ((h21 * h32 - h22 * h31) * x + (h12 * h31 - h11 * h32) * y + h11 * h22 - h12 * h21);
+                float new_x = ((h22 - h23 * h32) * x + (h13 * h32 - h12) * y + h12 * h23 - h13 * h22) / new_w;
+                float new_y = ((h23 * h31 - h21) * x + (h11 - h13 * h31) * y + h13 * h21 - h11 * h23) / new_w;
+                
+                new_x = (new_x + 0.5) * imageMoving.width();
+                new_y = (new_y + 0.5) * imageMoving.height();
+
+                int temp_x = round(columns * (x+0.5));
+                int temp_y = round(rows * (y+0.5));
+
+                // printf("new_x = %f, new_y = %f, temp_x = %d, temp_y = %d\n", new_x, new_y, temp_x, temp_y);
+                switch (c) {
+                    case 1:
+                        if (imageReference.inImage(new_y, new_x)) {
+                            // imageFused.template at<float>(y, x, c) = imageReference.valueAt_bilinear(new_y, new_x,
+                            //                                                                          fusedChannel);
+                            imageFused.template at<float>(temp_y, temp_x, c) = imageReference.valueAt_bilinear(new_y, new_x,
+                                                                                                     fusedChannel);
+                        }
+                        break;
+                    case 0:
+                    case 2:
+                        if (imageMoving.inImage(new_y, new_x)) {
+                            // imageFused.template at<float>(y, x, c) = imageMoving.valueAt_bilinear(new_y, new_x,
+                            //                                                                       fusedChannel);
+                            imageFused.template at<float>(temp_y, temp_x, c) = imageMoving.valueAt_bilinear(new_y, new_x,
+                                                                                                  fusedChannel);
+                        }
+                        break;
+                }
+            }
+        }
+    }
+}
+
+template<typename pixType, uint8_t D, uint8_t CHANNEL>
+__global__ void transformImage_local(nv_ext::Vec<float, D> H, int rowsm, int colsm,
+                               CudaImage<pixType, CHANNEL> imageIn,
+                               CudaImage<pixType, CHANNEL> imageOut) {
+    // int colsm = imageOut.width();
+    // int rowsm = imageOut.height();
+
+    // Transform the image
+    float &h11 = H[0], &h12 = H[1], &h13 = H[2], &h21 = H[3], &h22 = H[4], &h23 = H[5], &h31 = H[6], &h32 = H[7];
+    for (int x = 0; x < colsm; x++) {
+        for (int y = 0; y < rowsm; y++) {
+            //float denom = (h11*h22 - h12*h21 - h11*h23*h32 + h12*h23*h31 + h13*h21*h32 - h13*h22*h31);
+            float new_w = ((h21 * h32 - h22 * h31) * x + (h12 * h31 - h11 * h32) * y + h11 * h22 - h12 * h21);
+            float new_x = ((h22 - h23 * h32) * x + (h13 * h32 - h12) * y + h12 * h23 - h13 * h22) / new_w;
+            float new_y = ((h23 * h31 - h21) * x + (h11 - h13 * h31) * y + h13 * h21 - h11 * h23) / new_w;
+            if (imageIn.inImage(new_y, new_x)) {
+                for (int c = 0; c < CHANNEL; c++) {
+                    imageOut.template at<float>(y, x, c) = imageIn.valueAt_bilinear(new_y, new_x, c);
+                }
+            }
+        }
+    }
+}
+
+template<typename pixType, uint8_t CHANNEL>
+void
+writeTransformedImageToDisk_local(CudaImage<pixType, CHANNEL> image, int rowsf, int colsf, nv_ext::Vec<float, 8> H,
+                            std::string img_out_filename) {
+    CudaImage<uint8_t, CHANNEL> image_out(rowsf, colsf);
+    checkCudaErrors(cudaMalloc(&image_out.data(), image_out.bytesSize()));
+    checkCudaErrors(cudaMemset(image_out.data(), 0, image_out.bytesSize()));
+    transformImage_local<uint8_t, 8, CHANNELS><<<1, 1>>>(H, rowsf, colsf, image, image_out);
+
+    uint8_t *hostValues;
+    checkCudaErrors(cudaMallocHost(&hostValues, image_out.bytesSize()));
+    checkCudaErrors(cudaMemcpy(hostValues, image_out.data(), image_out.bytesSize(), cudaMemcpyDeviceToHost));
+    if (endsWithCaseInsensitive(img_out_filename, ".png")) {
+        stbi_write_png(img_out_filename.c_str(), image_out.width(), image_out.height(), CHANNELS, hostValues,
+                       image.width() * sizeof(pixType) * CHANNELS);
+        // You have to use 3 comp for complete jpg file. If not, the image will be grayscale or nothing.
+    } else if (endsWithCaseInsensitive(img_out_filename, ".jpg")) {
+        stbi_write_jpg(img_out_filename.c_str(), image_out.width(), image_out.height(), CHANNELS, hostValues, 95);
+    } else {
+        std::cout << "Filename suffix has image format not recognized." << std::endl;
+    }
+    cudaFreeHost(hostValues);
+    checkCudaErrors(cudaFree(image_out.data()));
+}
+
+template<typename pixType, uint8_t CHANNEL>
+void writeAlignedAndFusedImageToDisk_local(CudaImage<pixType, CHANNEL> image_fix,
+                                     CudaImage<pixType, CHANNEL> image_mov,
+                                     nv_ext::Vec<float, 8> estimatedH,
+                                     nv_ext::Vec<float, 8> trueH,
+                                     std::string img_fused_filename) {
+    CudaImage<uint8_t, 3> image_fused(image_fix.height(), image_fix.width());
+    checkCudaErrors(cudaMalloc(&image_fused.data(), image_fused.bytesSize()));
+    checkCudaErrors(cudaMemset(image_fused.data(), 0, image_fused.bytesSize()));
+    fuseAlignedImages_local<uint8_t, 8, CHANNELS><<<1, 1>>>(estimatedH, trueH, image_fix, image_mov, image_fused, 0);
+
+    uint8_t *hostValues_fused;
+    checkCudaErrors(cudaMallocHost(&hostValues_fused, image_fused.bytesSize()));
+    checkCudaErrors(cudaMemcpy(hostValues_fused, image_fused.data(), image_fused.bytesSize(), cudaMemcpyDeviceToHost));
+    if (endsWithCaseInsensitive(img_fused_filename, ".png")) {
+        stbi_write_png(img_fused_filename.c_str(), image_fused.width(), image_fused.height(), 3, hostValues_fused,
+                       image_fix.width() * sizeof(uint8_t) * 3);
+        // You have to use 3 comp for complete jpg file. If not, the image will be grayscale or nothing.
+    } else if (endsWithCaseInsensitive(img_fused_filename, ".jpg")) {
+        stbi_write_jpg(img_fused_filename.c_str(), image_fused.width(), image_fused.height(), 3, hostValues_fused, 95);
+    } else {
+        std::cout << "Filename suffix has image format not recognized." << std::endl;
+    }
+    cudaFreeHost(hostValues_fused);
+    checkCudaErrors(cudaFree(image_fused.data()));
+}
 
 // Generic functor
 template<typename _Scalar, int NX = Eigen::Dynamic, int NY = Eigen::Dynamic>
@@ -148,7 +290,7 @@ struct my_functor : Functor<float>
             minParams[i] = x(i);
         nv_ext::Vec<float, grid_dimension> minParamsVec(minParams);
 
-//        fvec(0) = sqrt(calcNCCAlt<func_precision, grid_precision, grid_dimension, CHANNELS, pixel_precision>(minParamsVec, *image_fix_test, *image_mov_test));
+        fvec(0) = calcMIAlt<func_precision, grid_precision, grid_dimension, CHANNELS, pixel_precision>(minParamsVec, *image_fix_test, *image_mov_test);
         for (int i = 1; i < grid_dimension; i++)
             fvec(i) = 0;
         return 0;
@@ -520,6 +662,7 @@ int main(int argc, char **argv) {
     scaleX = 1;
     scaleY = 1;
     float MAX_NONOVERLAPPING_PCT = 0.5f;
+
     std::vector<grid_precision> num_samples = {(grid_precision) 32,
                                                (grid_precision) 16,
                                                (grid_precision) 16,
@@ -622,34 +765,40 @@ int main(int argc, char **argv) {
     outfile << "MinParams,";
     for (int i = 0; i < grid_dimension; i++) outfile << minParams[i] << ",";
     // Non-linear optimizer
-    // Eigen::VectorXf x(grid_dimension);
-    // for(int i = 0; i < grid_dimension; i++)
-    //     x(i) = minParams[i];
-    // std::cout << "x: " << x << std::endl;
+    Eigen::VectorXf x(grid_dimension);
+    for(int i = 0; i < grid_dimension; i++)
+        x(i) = minParams[i];
+    std::cout << "x: " << x << std::endl;
 
-    // my_functor functor;
-    // Eigen::NumericalDiff<my_functor> numDiff(functor);
-    // Eigen::LevenbergMarquardt<Eigen::NumericalDiff<my_functor>,float> lm(numDiff);
-    // lm.parameters.maxfev = 2000;
-    //lm.parameters.xtol = 1.0e-10;
+    my_functor functor;
+    Eigen::NumericalDiff<my_functor> numDiff(functor);
+    Eigen::LevenbergMarquardt<Eigen::NumericalDiff<my_functor>,float> lm(numDiff);
+    lm.parameters.maxfev = 2000;
+    lm.parameters.xtol = 1.0e-10;
 
+    // TODO: Uncomment this later
     // int ret = lm.minimize(x);
     // std::cout << "Iterations: " << lm.iter << ", Return code: " << ret << std::endl;
 
-    // std::cout << "x that minimizes the function: " << x << std::endl;
+    std::cout << "x that minimizes the function: " << x << std::endl;
 
     // Convert min Values to H
-    // for(int i = 0; i < grid_dimension; i++)
-    //     minParams[i] = x(i);
+    for(int i = 0; i < grid_dimension; i++)
+        minParams[i] = x(i);
 
     float h11 = 0, h12 = 0, h13 = 0, h21 = 0, h22 = 0, h23 = 0, h31 = 0, h32 = 0;
     float cx = (float) xm / 2, cy = (float) ym / 2;
     nv_ext::Vec<float, grid_dimension> minParamsVec(minParams);
     //std::cout << "Min Value check: " << calcMIAlt<func_precision, grid_precision, grid_dimension, CHANNELS, pixel_precision>(minParamsVec, *image_fix_test, *image_mov_test) << std::endl;
-    parametersToHomography<grid_precision, grid_dimension>(minParamsVec, cx, cy,
+    parametersToHomographyNorm<grid_precision, grid_dimension>(minParamsVec, 
+                                                           xm, ym, xf, yf,
                                                            h11, h12, h13,
                                                            h21, h22, h23,
                                                            h31, h32);
+    // centerHomography<grid_precision, grid_dimension>(cx, cy,
+    //     h11, h12, h13,
+    //     h21, h22, h23,
+    //     h31, h32);
     float minH[] = {h11, h12, h13,
                     h21, h22, h23,
                     h31, h32};
@@ -663,6 +812,24 @@ int main(int argc, char **argv) {
 
     std::cout << "Scale_factor[" << scale_factor_x << "," << scale_factor_y << "]" << std::endl;
 
+    std::cout << "Homography_to_parameters[";
+    // uncenterHomography<grid_precision, grid_dimension>(cx, cy,
+    //     h11, h12, h13,
+    //     h21, h22, h23,
+    //     h31, h32);
+    homographyToParameters<grid_precision, grid_dimension>(h11, h12, h13,
+                           h21, h22, h23,
+                           h31, h32,
+                           minParamsVec);
+    // centerHomography<grid_precision, grid_dimension>(cx, cy,
+    //     h11, h12, h13,
+    //     h21, h22, h23,
+    //     h31, h32);
+    
+    for (int i = 0; i < grid_dimension; i++) {
+        std::cout << minParamsVec[i] << ((i < grid_dimension - 1) ? "," : "");
+    }
+    std::cout << "]" << std::endl;
     float tempGTH[] = {h11, h12, h13, h21, h22, h23, h31, h32};
     std::ifstream gtFile(gt_filename.c_str());
     // Check if gtFile exists
@@ -708,10 +875,10 @@ int main(int argc, char **argv) {
     nv_ext::Vec<float, 8> H(minH);
     nv_ext::Vec<float, 8> gtH(tempGTH);
     // Write an output image to disk
-    writeTransformedImageToDisk<uint8_t, CHANNELS>(image_mov, yf, xf, H, img_out_filename);
+    writeTransformedImageToDisk_local<uint8_t, CHANNELS>(image_mov, yf, xf, H, img_out_filename);
 
     // Write aligned and fused output image to disk
-    writeAlignedAndFusedImageToDisk<uint8_t, CHANNELS>(image_fix, image_mov, H, gtH, img_fused_filename);
+    writeAlignedAndFusedImageToDisk_local<uint8_t, CHANNELS>(image_fix, image_mov, H, gtH, img_fused_filename);
 
     // Clean memory
     checkCudaErrors(cudaFree(image_fix.data()));

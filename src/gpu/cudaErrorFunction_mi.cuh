@@ -24,7 +24,7 @@ CUDAFUNCTION func_precision calcMI(nv_ext::Vec<grid_precision, D> &parameters,
     // printf("Starting %d\n", blockIdx.x * blockDim.x + threadIdx.x);
 
     float h11 = 0, h12 = 0, h13 = 0, h21 = 0, h22 = 0, h23 = 0, h31 = 0, h32 = 0, cx = (float)colsm/2, cy = (float)rowsm/2;
-    parametersToHomography<float,8>(parameters, cx, cy,
+    parametersToHomographyNorm<float,8>(parameters, cx, cy,
         h11, h12, h13,
         h21, h22, h23,
         h31, h32);
@@ -132,12 +132,7 @@ CUDAFUNCTION func_precision calcMIAlt(nv_ext::Vec<grid_precision, D> &parameters
 
     // printf("Starting %d\n", blockIdx.x * blockDim.x + threadIdx.x);
 
-    float h11 = 0, h12 = 0, h13 = 0, h21 = 0, h22 = 0, h23 = 0, h31 = 0, h32 = 0, cx = (float)colsm/2, cy = (float)rowsm/2;
-    parametersToHomography<float,8>(parameters, cx, cy,
-        h11, h12, h13,
-        h21, h22, h23,
-        h31, h32);
-
+    float h11 = 0, h12 = 0, h13 = 0, h21 = 0, h22 = 0, h23 = 0, h31 = 0, h32 = 0;
 
     float test_pxy[64][64] = {{0}};
     float test_py[64] = {0};
@@ -152,36 +147,38 @@ CUDAFUNCTION func_precision calcMIAlt(nv_ext::Vec<grid_precision, D> &parameters
     float mov_area = 0;
     float fix_area = 0;
 
-    for(int row = 0; row < rowsf; row++) {
+    parametersToHomographyNorm<float,8>(parameters, 
+        colsm, rowsm, colsf, rowsf,
+        h11, h12, h13,
+        h21, h22, h23,
+        h31, h32);
+
+    for(float row = -0.5; row < 0.5; row += 1/((float)(rowsf-1))) {
         float lambda_start = 0;
-        float lambda_end = colsf;
+        float lambda_end = 1;
         float v_x = 0;
         float v_y = 0;
         float p0_x = 0;
         float p0_y = 0;
         bool inImage = false;
 
-        parametricAssignValues(h11, h12, h13, h21, h22, h23, h31, h32,
+        parametricAssignValuesNorm(h11, h12, h13, h21, h22, h23, h31, h32,
                             colsm, rowsm, colsf, rowsf, row,
                             lambda_start, lambda_end, v_x, v_y, p0_x, p0_y, inImage);
         float mag_norm = sqrt(v_x * v_x + v_y * v_y);
-    // for (int x = 0; x < colsf; x++) {
-        // for (int y = 0; y < rowsf; y++) {
-        for (float lambda = lambda_start; lambda < lambda_end && lambda < colsf; lambda += 1) {
-            float new_x = lambda * v_x + p0_x;
-            float new_y = lambda * v_y + p0_y;
-            // float new_x = 0, new_y = 0;
-            // calcNewCoordH(h11, h12, h13,
-            //     h21, h22, h23,
-            //     h31, h32,
-            //     x, y,
-            //     new_x, new_y);
-            if (inImage){
+
+        if (inImage){            
+            for (float lambda = lambda_start; lambda < lambda_end && lambda < 1; lambda += 1/((float)(colsf-1))) {
+                float new_x = lambda * v_x + p0_x;
+                float new_y = lambda * v_y + p0_y;
+
+                new_x = (new_x + 0.5) * (colsm);
+                new_y = (new_y + 0.5) * (rowsm);
+
+                float rowIdx = ((row + 0.5) * (rowsf-1));
+                float lambdaIdx = (lambda*(colsf-1));
                 for (int c = 0; c < CHANNELS; c++) {
-                // if (img_moved.inImage(new_y, new_x)) {
-                    // tempImage[new_y * colsf + new_x] = img_moved[y * colsm + x];
-                    // Change this to take into account of pxy and py
-                    unsigned long tempx = floor((binN) * (img_fixed.valueAt(row, lambda, c) / 256.0f));
+                    unsigned long tempx = floor((binN) * (img_fixed.valueAt(rowIdx, lambdaIdx, c) / 256.0f));
                     unsigned long tempy = floor((binN) * (img_moved.valueAt(new_y, new_x, c) / 256.0f));
 
                     test_pxy[tempx][tempy] += (1.0f);
@@ -190,7 +187,7 @@ CUDAFUNCTION func_precision calcMIAlt(nv_ext::Vec<grid_precision, D> &parameters
                     count += 1;
 
                     i1 += img_moved.valueAt(new_y, new_x, c) / 255.0f * img_moved.valueAt(new_y, new_x, c) / 255.0f;
-                    i2 += img_fixed.valueAt(row, lambda, c) / 255.0f * img_fixed.valueAt(row, lambda, c) / 255.0f;
+                    i2 += img_fixed.valueAt(rowIdx, lambdaIdx, c) / 255.0f * img_fixed.valueAt(rowIdx, lambdaIdx, c) / 255.0f;
                 }
                 mov_area += mag_norm;
                 fix_area += 1;
@@ -243,8 +240,7 @@ CUDAFUNCTION func_precision calcMIAlt(nv_ext::Vec<grid_precision, D> &parameters
     }
     
     // Return output
-    
-    if(mov_area / (colsm * rowsm * parameters[2]) > 0.90 && fix_area / (colsf * rowsf) > 0.40)
+    if(mov_area / (colsm * rowsm * parameters[2]) > 0.80 && fix_area / (colsf * rowsf) > 0.40)
         return -1*output;
     else
         return (func_precision) 123123.0f;
