@@ -764,6 +764,109 @@ int main(int argc, char **argv) {
 
     outfile << "MinParams,";
     for (int i = 0; i < grid_dimension; i++) outfile << minParams[i] << ",";
+
+    // Covariance calculation
+    grid_precision *covar_matrix = new grid_precision[(grid_dimension+1)*(grid_dimension+1)];
+    num_samples = {(grid_precision) 3,
+                    (grid_precision) 3,
+                    (grid_precision) 3,
+                    (grid_precision) 3,
+                    (grid_precision) 3,
+                    (grid_precision) 3,
+                    (grid_precision) 1,
+                    (grid_precision) 1
+    };
+
+    start_point = {static_cast<float>((grid_precision) minParams[0] - 3 * PI / 32), // theta
+                                               (grid_precision) (minParams[1] - 1.0f), // scaleX
+                                               (grid_precision) (minParams[2] - 1.0f), // scaleY
+                                               (grid_precision) (minParams[3] - 0.05),  // shearXY
+                                               (grid_precision) (minParams[4] - 5.0f),  // translateX
+                                               (grid_precision) (minParams[5] - 5.0f),  // translateY
+                                               (grid_precision) 0, // keystoneX
+                                               (grid_precision) 0  // keystoneY
+    };
+
+    end_point = {static_cast<float>((grid_precision) minParams[0] + 3 * PI / 32),
+                                             (grid_precision) (minParams[1] + 1.0f),
+                                             (grid_precision) (minParams[2] + 1.0f),
+                                             (grid_precision) (minParams[3] + 0.05),
+                                             (grid_precision) (minParams[4] + 5.0f),
+                                             (grid_precision) (minParams[4] + 5.0f),
+                                             (grid_precision) 0,
+                                             (grid_precision) 0
+    };
+
+    {
+        CudaGrid<grid_precision, grid_dimension> translation_xy_grid;
+        checkCudaErrors(cudaMalloc(&translation_xy_grid.data(), translation_xy_grid.bytesSize()));
+
+        translation_xy_grid.setStartPoint(start_point);
+        translation_xy_grid.setEndPoint(end_point);
+        translation_xy_grid.setNumSamples(num_samples);
+        translation_xy_grid.display("translation_xy_grid");
+
+        grid_precision axis_sample_counts[grid_dimension];
+        translation_xy_grid.getAxisSampleCounts(axis_sample_counts);
+
+        CudaTensor<func_precision, grid_dimension> func_values(axis_sample_counts);
+        checkCudaErrors(cudaMalloc(&func_values.data(), func_values.bytesSize()));
+        //func_values.fill(0);
+
+        // first template argument is the error function return type
+        // second template argument is the grid point value type
+        CudaGridSearcher<func_precision, grid_precision, grid_dimension> translation_xy_gridsearcher(
+                translation_xy_grid,
+                func_values);
+
+        // Mutual Information
+        // Copy device function pointer for the function having by-value parameters to host side
+        cudaMemcpyFromSymbol(&host_func_byval_ptr, dev_func_byvalue_ptr,
+                             sizeof(image_err_func_byvalue));
+
+        //translation_xy_gridsearcher.search(host_func_byval_ptr, m1, m2);
+        translation_xy_gridsearcher.search_by_value(host_func_byval_ptr, image_mov, image_fix);
+        // translation_xy_gridsearcher.search_by_value_stream(host_func_byval_ptr, 10000, 1, image_mov, image_fix);
+        // translation_xy_gridsearcher.search_by_value_stream(host_func_byval_ptr, 10000, image_fix.height(), image_mov, image_fix);
+
+        // func_values.display();
+
+        
+        for(int i = 0; i < (grid_dimension+1)*(grid_dimension+1); i++) {
+            covar_matrix[i] = 0;
+        }
+        // grid_precision covar_matrix[(grid_dimension+1)*(grid_dimension+1)] = {0};
+        translation_xy_gridsearcher.covariance_by_value(covar_matrix);
+
+        printf("Covariance matrix:\n");
+        for(int i = 0; i < grid_dimension+1; i++) {
+            printf("[");
+            for(int d = 0; d < grid_dimension+1; d++) {
+                printf("%e, ", covar_matrix[(i * (grid_dimension+1)) + d]);
+            }
+            printf("]\n");
+        }
+        
+        // func_precision min_value;
+        // int32_t min_value_index1d;
+        // func_values.find_extrema(min_value, min_value_index1d);
+
+        // grid_precision min_grid_point[grid_dimension];
+        // translation_xy_grid.getGridPoint(min_grid_point, min_value_index1d);
+        // std::cout << "Minimum found at point p = { ";
+        // for (int d = 0; d < grid_dimension; d++) {
+        //     std::cout << min_grid_point[d] << ((d < grid_dimension - 1) ? ", " : " ");
+        //     minParams[d] = min_grid_point[d];
+
+        //     start_point[d] = min_grid_point[d] - (end_point[d] - start_point[d]) / 4;
+        //     end_point[d] = min_grid_point[d] + (end_point[d] - start_point[d]) / 4;
+        // }
+        // std::cout << "}" << std::endl;
+
+        checkCudaErrors(cudaFree(translation_xy_grid.data()));
+        checkCudaErrors(cudaFree(func_values.data()));
+    }
+
     // Non-linear optimizer
     Eigen::VectorXf x(grid_dimension);
     for(int i = 0; i < grid_dimension; i++)
@@ -830,6 +933,12 @@ int main(int argc, char **argv) {
         std::cout << minParamsVec[i] << ((i < grid_dimension - 1) ? "," : "");
     }
     std::cout << "]" << std::endl;
+
+    std::cout << "covar_matrix[";
+    for (int i = 0; i < (grid_dimension + 1) * (grid_dimension + 1); i++) {
+        std::cout << covar_matrix[i] << ((i < (((grid_dimension + 1) * (grid_dimension + 1)) - 1)) ? "," : "");
+    }
+    std::cout << "]" << std::endl;
     float tempGTH[] = {h11, h12, h13, h21, h22, h23, h31, h32};
     std::ifstream gtFile(gt_filename.c_str());
     // Check if gtFile exists
@@ -887,5 +996,6 @@ int main(int argc, char **argv) {
 
     stbi_image_free(dataf);
     stbi_image_free(datam);
+    delete[] covar_matrix;
     return EXIT_SUCCESS;
 }

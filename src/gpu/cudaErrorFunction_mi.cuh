@@ -243,7 +243,7 @@ CUDAFUNCTION func_precision calcMIAlt(nv_ext::Vec<grid_precision, D> &parameters
     if(mov_area / (colsm * rowsm * parameters[2]) > 0.80 && fix_area / (colsf * rowsf) > 0.40)
         return -1*output;
     else
-        return (func_precision) 123123.0f;
+        return (func_precision) 0.0f;
 }
 
 #endif

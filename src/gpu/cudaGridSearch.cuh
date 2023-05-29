@@ -313,6 +313,57 @@ __global__ void evaluationKernel_by_value(CudaGrid<grid_precision, D> grid,
 //    delete[] grid_point;
 }
 
+template<typename func_precision, typename grid_precision, unsigned int D>
+__global__ void calculateCovariance_by_value(CudaGrid<grid_precision, D> grid,
+                                          func_precision *result,
+                                          uint32_t result_size,
+                                          grid_precision *covar) {
+    int threadIndex = (blockDim.x * blockIdx.x + threadIdx.x);
+    if (threadIndex == 0) {
+        grid_precision grid_point[D];
+        grid_precision mean_holder[D+1];
+
+        for (int d = 0; d < D+1; d++) {
+            mean_holder[d] = 0;
+        }
+        for (int tempIdx = 0; tempIdx < result_size; tempIdx++) {
+            grid.indexToGridPoint(threadIndex, grid_point);
+            for (int d = 0; d < D; d++) {
+                mean_holder[d] += grid_point[d];
+            }
+            mean_holder[D] += *(result+tempIdx);
+        }
+        for (int d = 0; d < D+1; d++) {
+            mean_holder[d] /= ((grid_precision)result_size);
+        }
+
+        for (int covarIdx = 0; covarIdx < (D+1) * (D+1); covarIdx++) {
+            for (int tempIdx = 0; tempIdx < result_size; tempIdx++) {
+                grid.indexToGridPoint(tempIdx, grid_point);
+                grid_precision A = 0;
+                grid_precision B = 0;
+                
+                if(covarIdx / (D+1) == D) {
+                    A = *(result+tempIdx) - mean_holder[covarIdx / (D+1)];
+                }
+                else {
+                    A = grid_point[covarIdx / (D+1)] - mean_holder[covarIdx / (D+1)];
+                }
+
+                if(covarIdx % (D+1) == D) {
+                    B = *(result+tempIdx) - mean_holder[covarIdx % (D+1)];
+                }
+                else {
+                    B = grid_point[covarIdx % (D+1)] - mean_holder[covarIdx % (D+1)];
+                }
+                covar[covarIdx] += A * B;
+            }
+            covar[covarIdx] /= ((grid_precision)(result_size-1));
+            // printf("covarIdx %d = %e\n", covarIdx, covar[covarIdx]);
+        }
+    }
+}
+
 template<typename func_precision, typename grid_precision, unsigned int D, typename ... Types>
 __global__ void evaluationKernel_by_value_block(CudaGrid<grid_precision, D> grid,
                                           func_precision *result,
@@ -659,6 +710,34 @@ struct CudaGridSearcher {
         printf("Time Taken: %f\n", elapsed_seconds.count());
     }
     // this will search a function with by-value arguments
+
+template<typename ... Types>
+    void covariance_by_value(grid_precision *covar_matrix) {
+
+        std::vector<grid_precision> point(_grid->getDimension(), 0);
+        uint32_t total_samples = _grid->numElements();
+        std::cout << "CudaGrid has " << total_samples << " search samples." << std::endl;
+//        std::cout << "CudaTensor for results has " << _result->size() << " values." << std::endl;
+
+        // compute 1D search grid, block and thread index pattern
+        dim3 gridDim(1, 1, 1), blockDim(1, 1, 1);
+
+        // create grid point and result image
+        std::chrono::time_point<std::chrono::system_clock> start, end;
+
+        start = std::chrono::system_clock::now();
+        grid_precision *covar_device;
+        cudaMalloc(&covar_device, sizeof(grid_precision) * (_grid->getDimension() + 1) * (_grid->getDimension() + 1));
+        cudaMemcpy(covar_device, covar_matrix, sizeof(grid_precision) * (_grid->getDimension() + 1) * (_grid->getDimension() + 1), cudaMemcpyHostToDevice);
+        calculateCovariance_by_value<<< gridDim, blockDim>>>(*_grid, (*_result).data(), total_samples, covar_device);
+        gpuErrchk(cudaPeekAtLastError());
+        gpuErrchk(cudaDeviceSynchronize());
+        end = std::chrono::system_clock::now();
+        std::chrono::duration<double> elapsed_seconds = end - start;
+        printf("Time Taken: %f\n", elapsed_seconds.count());
+        cudaMemcpy(covar_matrix, covar_device, sizeof(grid_precision) * (_grid->getDimension() + 1) * (_grid->getDimension() + 1), cudaMemcpyDeviceToHost);
+        cudaFree(covar_device);
+    }
 
     template<typename ... Types>
     void search_by_value_block(func_byvalue_t<func_precision, grid_precision, D, Types ...> errorFunction, int numThreads,
