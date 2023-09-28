@@ -5,19 +5,25 @@ clc;
 % SET NUM_FILES = 100000 TO DO ALL FILES
 NUM_FILES = 100000;
 %NUM_FILES = 2;
-USER_FOLDER = 'arwillis';
+USER_FOLDER = 'cbeam18';
 ERROR_THRESHOLD = 0.18;
-INTENSITY_MODIFIER = "20";
+INTENSITY_MODIFIER = "1";
 
 % Change these file paths to match your path setup
 % dataFolder_moving = fullfile('..','src','gpu', 'testImages','reg','sar');
 % dataFolder_reference = fullfile('..','src','gpu', 'testImages','reg','gmap');
+% Beam - UNIVERSITY SITE CONFIG
+dataFolder_root = fullfile('/home','server','SAR');
+dataFolder_results = fullfile('/home', USER_FOLDER, 'Desktop', 'cuGridSearch', 'matlab', 'results');
+execute_binary='../build/src/cpu/multispectral_ImageMatcher';
+library_path='../build/lib';
 % Willis - UNIVERSITY SITE CONFIG
 %dataFolder_root = fullfile('/home', USER_FOLDER, 'CLionProjects', 'georeg_exps');
 %dataFolder_root = fullfile('/home','server', 'SAR');
 % Willis - HOME SITE CONFIG
-dataFolder_root = fullfile('/home', USER_FOLDER, 'CLionProjects', 'georeg_exps');
-dataFolder_results = fullfile('/home', USER_FOLDER,  'CLionProjects', 'georeg_exps', 'results');
+% dataFolder_root = fullfile('/home', USER_FOLDER, 'CLionProjects', 'georeg_exps');
+% dataFolder_results = fullfile('/home', USER_FOLDER,  'CLionProjects', 'georeg_exps', 'results');
+% execute_binary='../cmake-build-debug/src/cpu/multispectral_ImageMatcher';
 
 datasetName{1}='EPIC';
 datafileGTName{1}='rosgeoregistration_2022_12_21_23_38_22.log';
@@ -27,7 +33,7 @@ datasetName{3}='Isleta';
 datafileGTName{3}='rosgeoregistration_2022_12_21_21_28_42.log';
 
 dataset(1).date = date;
-for DATASET_INDEX=1:3
+for DATASET_INDEX=1:1
     
     dataFolder_dataset = fullfile('geo_dataset', datasetName{DATASET_INDEX});
     dataFolder_moving = fullfile(dataFolder_root, dataFolder_dataset, 'moving');
@@ -37,7 +43,7 @@ for DATASET_INDEX=1:3
     
     gt_data = readtable(fullfile(dataFolder_root, dataFolder_dataset, datafileGTName{DATASET_INDEX}));
     
-    execute_binary='../cmake-build-debug/src/cpu/multispectral_ImageMatcher';
+    
     
     imds_reference = imageDatastore(dataFolder_reference, 'IncludeSubfolders',true,'LabelSource','foldernames');
     imds_moving = imageDatastore(dataFolder_moving, 'IncludeSubfolders',true,'LabelSource','foldernames');
@@ -47,6 +53,7 @@ for DATASET_INDEX=1:3
     scale_list = [];
     runtime_list = [];
     corner_error_statistics = [];
+    parameter_list = [];
     
     f1_handle = figure('Visible','off');
     
@@ -73,6 +80,7 @@ for DATASET_INDEX=1:3
             "--i_mov", " ", image_mov);
         
         time_start = tic;
+        command = strcat('export LD_LIBRARY_PATH=', library_path, ' ; ', command);
         [status, cmdout] = system(command);
         runtime = toc(time_start);
 
@@ -81,14 +89,18 @@ for DATASET_INDEX=1:3
         grid_values.stop = str2num(grid_values_str{2}{1});
         grid_values.stepsize = str2num(grid_values_str{3}{1});
         grid_values.numsteps = str2num(grid_values_str{4}{1});
-        result = regexp(cmdout,"Answer\[([^\]]*)]\s+Scale_factor\[([^\]]*)]", "tokens");
+        result = regexp(cmdout,"Answer\[([^\]]*)]\s+Scale_factor\[([^\]]*)]\s+Homography_to_parameters\[([^\]]*)]\s+covar_matrix\[([^\]]*)]", "tokens");
         H_estimated = reshape(str2num(result{1}{1}),1,[]);
         H_estimated = [H_estimated 1]; % Only has 8 values originally, needs h33 to be 1
+        H_estimated_uncentered = H_estimated;
         scale_factor = reshape(str2num(result{1}{2}),1,[]);
+        parameter_values = reshape(str2num(result{1}{3}),1,[]);
+        covariance_values = reshape(str2num(result{1}{4}),1,[]);
         H_estimated_list = [H_estimated_list; H_estimated];
         H_estimated = reshape(H_estimated, 3, 3)';
         scale_list = [scale_list; scale_factor];
         runtime_list = [runtime_list; runtime];
+        parameter_list = [parameter_list; parameter_values];
         
         I_fixed = imread(image_ref{1});
         I_moving = imread(image_mov{1});
@@ -110,7 +122,13 @@ for DATASET_INDEX=1:3
 %         tform = maketform('projective', [scale(1) 0 0; 0 scale(2) 0; 0 0 1]');
 %         I_fixed_scaled2 = imtransform(I_fixed, tform, 'XData',[1 cols],'YData',[1 rows], 'XYScale',1);
         
+        C1 = [1 0 -cols/2; 0 1 -rows/2; 0 0 1];
+        C2 = [1 0 cols/2; 0 1 rows/2; 0 0 1];
+%         H_est_temp = C2 * H_estimated * C1;
+%         H_estimated = [-0.552451 0.426764 55.8445; -0.266662 -0.512175 91.4012; 0 0 1];
+        H_estimated = C2 * H_estimated * C1;
         tform = maketform('projective', H_estimated');
+%         tform = maketform('projective', H_est_temp');
         I_moving_scaled_estimated = imtransform(I_moving, tform, 'XData',[1 cols],'YData',[1 rows], 'XYScale',1);
         
         tform = maketform('projective', H_ground_truth_rescaled');
@@ -176,15 +194,18 @@ for DATASET_INDEX=1:3
         dataset(DATASET_INDEX).match(fileIdx).filename_fixed = image_ref;
         dataset(DATASET_INDEX).match(fileIdx).grid = grid_values;
         dataset(DATASET_INDEX).match(fileIdx).scale_factor = scale_factor;
+        dataset(DATASET_INDEX).match(fileIdx).covariance_values = covariance_values;
         dataset(DATASET_INDEX).match(fileIdx).image_size_moving = size(I_moving);
         dataset(DATASET_INDEX).match(fileIdx).image_size_fixed = size(I_fixed);
         dataset(DATASET_INDEX).match(fileIdx).image_size_fixed_scaled = size(I_fixed_scaled);
         dataset(DATASET_INDEX).match(fileIdx).H_ground_truth = H_ground_truth;
         dataset(DATASET_INDEX).match(fileIdx).H_estimated = H_estimated;
+        dataset(DATASET_INDEX).match(fileIdx).H_estimated_uncentered = H_estimated_uncentered;
         dataset(DATASET_INDEX).match(fileIdx).corners_normalized_ground_truth = corners_normalized_ground_truth;
         dataset(DATASET_INDEX).match(fileIdx).corners_normalized_estimated = corners_normalized_estimated;
         dataset(DATASET_INDEX).match(fileIdx).avg_corner_normalized_error_mag = avg_corner_normalized_error_mag;
         dataset(DATASET_INDEX).match(fileIdx).runtime = runtime;
+        dataset(DATASET_INDEX).match(fileIdx).parameter_values = parameter_values;
     end
     dataset(DATASET_INDEX).date = date;
 end

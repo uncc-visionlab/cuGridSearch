@@ -766,7 +766,7 @@ int main(int argc, char **argv) {
     for (int i = 0; i < grid_dimension; i++) outfile << minParams[i] << ",";
 
     // Covariance calculation
-    grid_precision *covar_matrix = new grid_precision[(grid_dimension+1)*(grid_dimension+1)];
+    grid_precision *covar_matrix = new grid_precision[(grid_dimension)*(grid_dimension)];
     num_samples = {(grid_precision) 3,
                     (grid_precision) 3,
                     (grid_precision) 3,
@@ -832,17 +832,17 @@ int main(int argc, char **argv) {
         // func_values.display();
 
         
-        for(int i = 0; i < (grid_dimension+1)*(grid_dimension+1); i++) {
+        for(int i = 0; i < (grid_dimension)*(grid_dimension); i++) {
             covar_matrix[i] = 0;
         }
         // grid_precision covar_matrix[(grid_dimension+1)*(grid_dimension+1)] = {0};
         translation_xy_gridsearcher.covariance_by_value(covar_matrix);
 
         printf("Covariance matrix:\n");
-        for(int i = 0; i < grid_dimension+1; i++) {
+        for(int i = 0; i < grid_dimension; i++) {
             printf("[");
-            for(int d = 0; d < grid_dimension+1; d++) {
-                printf("%e, ", covar_matrix[(i * (grid_dimension+1)) + d]);
+            for(int d = 0; d < grid_dimension; d++) {
+                printf("%e, ", covar_matrix[(i * (grid_dimension)) + d]);
             }
             printf("]\n");
         }
@@ -935,8 +935,8 @@ int main(int argc, char **argv) {
     std::cout << "]" << std::endl;
 
     std::cout << "covar_matrix[";
-    for (int i = 0; i < (grid_dimension + 1) * (grid_dimension + 1); i++) {
-        std::cout << covar_matrix[i] << ((i < (((grid_dimension + 1) * (grid_dimension + 1)) - 1)) ? "," : "");
+    for (int i = 0; i < (grid_dimension) * (grid_dimension); i++) {
+        std::cout << covar_matrix[i] << ((i < (((grid_dimension) * (grid_dimension)) - 1)) ? "," : "");
     }
     std::cout << "]" << std::endl;
     float tempGTH[] = {h11, h12, h13, h21, h22, h23, h31, h32};
