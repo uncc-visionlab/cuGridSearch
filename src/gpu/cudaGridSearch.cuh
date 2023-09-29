@@ -321,9 +321,9 @@ __global__ void calculateCovariance_by_value(CudaGrid<grid_precision, D> grid,
     int threadIndex = (blockDim.x * blockIdx.x + threadIdx.x);
     if (threadIndex == 0) {
         grid_precision grid_point[D];
-        grid_precision mean_holder[D];
+        grid_precision mean_holder[D+1];
 
-        for (int d = 0; d < D; d++) {
+        for (int d = 0; d < D+1; d++) {
             mean_holder[d] = 0;
         }
         for (int tempIdx = 0; tempIdx < result_size; tempIdx++) {
@@ -333,28 +333,28 @@ __global__ void calculateCovariance_by_value(CudaGrid<grid_precision, D> grid,
             }
             mean_holder[D] += *(result+tempIdx);
         }
-        for (int d = 0; d < D; d++) {
+        for (int d = 0; d < D+1; d++) {
             mean_holder[d] /= ((grid_precision)result_size);
         }
 
-        for (int covarIdx = 0; covarIdx < (D) * (D); covarIdx++) {
+        for (int covarIdx = 0; covarIdx < (D+1) * (D+1); covarIdx++) {
             for (int tempIdx = 0; tempIdx < result_size; tempIdx++) {
                 grid.indexToGridPoint(tempIdx, grid_point);
                 grid_precision A = 0;
                 grid_precision B = 0;
                 
-                if(covarIdx / (D) == D) {
-                    A = *(result+tempIdx) - mean_holder[covarIdx / (D)];
+                if(covarIdx / (D+1) == D) {
+                    A = *(result+tempIdx) - mean_holder[covarIdx / (D+1)];
                 }
                 else {
-                    A = grid_point[covarIdx / (D)] - mean_holder[covarIdx / (D)];
+                    A = grid_point[covarIdx / (D+1)] - mean_holder[covarIdx / (D+1)];
                 }
 
-                if(covarIdx % (D) == D) {
-                    B = *(result+tempIdx) - mean_holder[covarIdx % (D)];
+                if(covarIdx % (D+1) == D) {
+                    B = *(result+tempIdx) - mean_holder[covarIdx % (D+1)];
                 }
                 else {
-                    B = grid_point[covarIdx % (D)] - mean_holder[covarIdx % (D)];
+                    B = grid_point[covarIdx % (D+1)] - mean_holder[covarIdx % (D+1)];
                 }
                 covar[covarIdx] += A * B;
             }
@@ -727,15 +727,15 @@ template<typename ... Types>
 
         start = std::chrono::system_clock::now();
         grid_precision *covar_device;
-        cudaMalloc(&covar_device, sizeof(grid_precision) * (_grid->getDimension()) * (_grid->getDimension()));
-        cudaMemcpy(covar_device, covar_matrix, sizeof(grid_precision) * (_grid->getDimension()) * (_grid->getDimension()), cudaMemcpyHostToDevice);
+        cudaMalloc(&covar_device, sizeof(grid_precision) * (_grid->getDimension() + 1) * (_grid->getDimension() + 1));
+        cudaMemcpy(covar_device, covar_matrix, sizeof(grid_precision) * (_grid->getDimension() + 1) * (_grid->getDimension() + 1), cudaMemcpyHostToDevice);
         calculateCovariance_by_value<<< gridDim, blockDim>>>(*_grid, (*_result).data(), total_samples, covar_device);
         gpuErrchk(cudaPeekAtLastError());
         gpuErrchk(cudaDeviceSynchronize());
         end = std::chrono::system_clock::now();
         std::chrono::duration<double> elapsed_seconds = end - start;
         printf("Time Taken: %f\n", elapsed_seconds.count());
-        cudaMemcpy(covar_matrix, covar_device, sizeof(grid_precision) * (_grid->getDimension()) * (_grid->getDimension()), cudaMemcpyDeviceToHost);
+        cudaMemcpy(covar_matrix, covar_device, sizeof(grid_precision) * (_grid->getDimension() + 1) * (_grid->getDimension() + 1), cudaMemcpyDeviceToHost);
         cudaFree(covar_device);
     }
 
@@ -801,4 +801,3 @@ template<typename ... Types>
 };
 
 #endif /* CUDAGRIDSEARCH_CUH */
-
