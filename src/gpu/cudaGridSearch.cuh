@@ -424,7 +424,7 @@ __global__ void evaluationKernel_by_value_stream(CudaGrid<grid_precision, D> gri
     if(threadIdx.x == 0) 
         *(result + streamIndex) = 0;
     __syncthreads();
-    *(result + streamIndex) += (*op)(gridpt, arg_vals...);
+    *(result + streamIndex) = (*op)(gridpt, arg_vals...);
 }
 
 template<typename func_precision, typename grid_precision, unsigned int D, typename ... Types>
