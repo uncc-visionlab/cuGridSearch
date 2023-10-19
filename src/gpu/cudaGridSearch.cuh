@@ -313,6 +313,7 @@ __global__ void evaluationKernel_by_value(CudaGrid<grid_precision, D> grid,
 //    delete[] grid_point;
 }
 
+// TODO: Get the raw values from the GPU and print it to send it to MATLAB or something that can do Fisher Information Matrix
 template<typename func_precision, typename grid_precision, unsigned int D>
 __global__ void calculateCovariance_by_value(CudaGrid<grid_precision, D> grid,
                                           func_precision *result,
@@ -321,46 +322,98 @@ __global__ void calculateCovariance_by_value(CudaGrid<grid_precision, D> grid,
     int threadIndex = (blockDim.x * blockIdx.x + threadIdx.x);
     if (threadIndex == 0) {
         grid_precision grid_point[D];
-        grid_precision mean_holder[D+1];
+        grid_precision mean_holder[D];
+        grid_precision x_minus_xmin[D];
+        grid_precision fx_total = 0;
 
         for (int d = 0; d < D+1; d++) {
             mean_holder[d] = 0;
         }
         for (int tempIdx = 0; tempIdx < result_size; tempIdx++) {
-            grid.indexToGridPoint(threadIndex, grid_point);
+            grid.indexToGridPoint(tempIdx, grid_point);
             for (int d = 0; d < D; d++) {
                 mean_holder[d] += grid_point[d];
             }
-            mean_holder[D] += *(result+tempIdx);
+            fx_total += *(result+tempIdx);
         }
-        for (int d = 0; d < D+1; d++) {
+        for (int d = 0; d < D; d++) {
             mean_holder[d] /= ((grid_precision)result_size);
         }
 
-        for (int covarIdx = 0; covarIdx < (D+1) * (D+1); covarIdx++) {
-            for (int tempIdx = 0; tempIdx < result_size; tempIdx++) {
-                grid.indexToGridPoint(tempIdx, grid_point);
+        grid_precision x_min[D];
+        grid.indexToGridPoint(result_size/2, x_min);
+        func_precision min_val = *(result + result_size/2);
+        for (int tempIdx = 0; tempIdx < result_size; tempIdx++) {
+        	if (tempIdx == result_size /2) continue;
+        	
+        	grid.indexToGridPoint(tempIdx, grid_point);
+        	grid_precision f_x = *(result+tempIdx);
+
+
+        	for(int d = 0; d < D; d++) {
+                x_minus_xmin[d] = grid_point[d] - x_min[d];
+            }
+            float length = 0;
+            for(int d = 0; d < D; d++) {
+            	length += x_minus_xmin[d] * x_minus_xmin[d];
+            }
+            length = sqrt(length);
+            float slope = log((*(result+tempIdx) - min_val) / (fx_total)) * ( 1 / length);
+
+            if (slope < 0) continue;
+
+            for(int d = 0; d < D; d++) {
+                x_minus_xmin[d] *= slope/length;
+            }
+            for (int covarIdx = 0; covarIdx < (D) * (D); covarIdx++) {
+                
                 grid_precision A = 0;
                 grid_precision B = 0;
                 
-                if(covarIdx / (D+1) == D) {
-                    A = *(result+tempIdx) - mean_holder[covarIdx / (D+1)];
-                }
-                else {
-                    A = grid_point[covarIdx / (D+1)] - mean_holder[covarIdx / (D+1)];
-                }
+                int row = covarIdx / D;
+                int col = covarIdx % D;
+                
+                
+                
+                // if(covarIdx / (D+1) == D) {
+                //     A = *(result+tempIdx) - mean_holder[covarIdx / (D+1)];
+                // }
+                // else {
+                //     A = grid_point[covarIdx / (D)] - mean_holder[covarIdx / (D)];
+                // }
 
-                if(covarIdx % (D+1) == D) {
-                    B = *(result+tempIdx) - mean_holder[covarIdx % (D+1)];
-                }
-                else {
-                    B = grid_point[covarIdx % (D+1)] - mean_holder[covarIdx % (D+1)];
-                }
-                covar[covarIdx] += A * B;
+                // if(covarIdx % (D+1) == D) {
+                //     B = *(result+tempIdx) - mean_holder[covarIdx % (D+1)];
+                // }
+                // else {
+                //     B = grid_point[covarIdx % (D)] - mean_holder[covarIdx % (D)];
+                // }
+                // covar[covarIdx] += A * B;
+                
+                covar[covarIdx] += x_minus_xmin[row] * x_minus_xmin[col];
             }
-            covar[covarIdx] /= ((grid_precision)(result_size-1));
+            // covar[covarIdx] /= ((grid_precision)(result_size-1));
             // printf("covarIdx %d = %e\n", covarIdx, covar[covarIdx]);
         }
+
+        for (int covarIdx = 0; covarIdx < (D) * (D); covarIdx++) {
+            covar[covarIdx] /= fx_total;
+        }
+
+        // printf("Results = [");
+        // for (int tempIdx = 0; tempIdx < result_size; tempIdx++) {
+        //     grid.indexToGridPoint(tempIdx, grid_point);
+        // 	grid_precision f_x = *(result+tempIdx);
+            
+        //     for(int idx = 0; idx < D; idx++) {
+        //         printf("%f, ", grid_point[idx]);
+        //     }
+
+
+        //     printf("%f;\n",f_x);
+
+        // }
+        // printf("];\n");
     }
 }
 
@@ -393,7 +446,7 @@ __global__ void evaluationKernel_by_value_block(CudaGrid<grid_precision, D> grid
     }
     __syncthreads();
 
-    *(result + blockIndex) += (*op)(gridpt, arg_vals...);
+    *(result + blockIndex) = (*op)(gridpt, arg_vals...);
 //    printf("func_byvalue_t %p setting gridvalue[%d] = %f\n", *op, threadIndex, *(result + threadIndex));
 //    delete[] grid_point;
 }
