@@ -122,37 +122,45 @@ CUDAFUNCTION func_precision calcMIAlt(nv_ext::Vec<grid_precision, D> &parameters
     // py = fixed image (zeroed)
     // pxy = 2d hist (zeroed)
     // TODO: Try CudaImage type for px,py,pxy
+
+    // Get fixed and moving rows/cols
     int colsf = img_fixed.width();
     int rowsf = img_fixed.height();
     int colsm = img_moved.width();
     int rowsm = img_moved.height();
+    // Set bin count
     const int binN = 64;
     // // Output holder
     func_precision output = 0;
 
     // printf("Starting %d\n", blockIdx.x * blockDim.x + threadIdx.x);
-
+    // Set up homography
     float h11 = 0, h12 = 0, h13 = 0, h21 = 0, h22 = 0, h23 = 0, h31 = 0, h32 = 0;
 
+    // XY, Y, and X bin for MI
     float test_pxy[64][64] = {{0}};
     float test_py[64] = {0};
     float test_px[64] = {0};
 
+    // Total image values for fixed and moving (don't need this if memory serves)
     float i1 = 0;
     float i2 = 0;
 
-    // Transform the image
+    // Overlap image count
     int count = 0;
 
+    // Moving and fixed image area traversed
     float mov_area = 0;
     float fix_area = 0;
 
+    // Go from parameters to homography
     parametersToHomographyNorm<float,8>(parameters, 
         colsm, rowsm, colsf, rowsf,
         h11, h12, h13,
         h21, h22, h23,
         h31, h32);
 
+    
     for(float row = -0.5; row < 0.5; row += 1/((float)(rowsf-1))) {
         float lambda_start = 0;
         float lambda_end = 1;
@@ -165,7 +173,7 @@ CUDAFUNCTION func_precision calcMIAlt(nv_ext::Vec<grid_precision, D> &parameters
         parametricAssignValuesNorm(h11, h12, h13, h21, h22, h23, h31, h32,
                             colsm, rowsm, colsf, rowsf, row,
                             lambda_start, lambda_end, v_x, v_y, p0_x, p0_y, inImage);
-        float mag_norm = sqrt(v_x * v_x + v_y * v_y);
+        float dimx_mov = sqrt(v_x * v_x + v_y * v_y);
 
         if (inImage){            
             for (float lambda = lambda_start; lambda < lambda_end && lambda < 1; lambda += 1/((float)(colsf-1))) {
@@ -189,8 +197,8 @@ CUDAFUNCTION func_precision calcMIAlt(nv_ext::Vec<grid_precision, D> &parameters
                     i1 += img_moved.valueAt(new_y, new_x, c) / 255.0f * img_moved.valueAt(new_y, new_x, c) / 255.0f;
                     i2 += img_fixed.valueAt(rowIdx, lambdaIdx, c) / 255.0f * img_fixed.valueAt(rowIdx, lambdaIdx, c) / 255.0f;
                 }
-                mov_area += mag_norm;
-                fix_area += 1;
+                mov_area += dimx_mov * dimx_mov;
+                fix_area += 1.0 / (colsf * rowsf);
             }
         }
     }
@@ -240,10 +248,10 @@ CUDAFUNCTION func_precision calcMIAlt(nv_ext::Vec<grid_precision, D> &parameters
     }
     
     // Return output
-    if(mov_area / (colsm * rowsm * parameters[2]) > 0.80 && fix_area / (colsf * rowsf) > 0.40)
-        return -1*output;
-    else
-        return (func_precision) 0.0f;
+    // if(mov_area / (colsm * rowsm * parameters[2]) > 0.80 && fix_area / (colsf * rowsf) > 0.40)
+        return -1*output * fix_area;
+    // else
+    //     return (func_precision) 0.0f;
 }
 
 #endif

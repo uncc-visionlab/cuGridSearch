@@ -360,6 +360,11 @@ float avg_filter_10x10_data[10 * 10] = {1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f /
                                         1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10, 1.0f / F_D10x10
 };
 
+float unsharpen_filter_3x3_data[3 * 3] = {0, -1.0f, 0,
+                                     -1.0f, 5.0f, -1.0f,
+                                     0, -1.0f, 0
+};
+
 void display_data(float *a, int ax, int ay) {
     for (int y = 0; y < ay; y++) {
         for (int x = 0; x < ax; x++) {
@@ -580,6 +585,10 @@ int main(int argc, char **argv) {
     checkCudaErrors(cudaMalloc(&avg_filter_10x10.data(), avg_filter_10x10.bytesSize()));
     avg_filter_10x10.setValuesFromVector(std::vector<float>(avg_filter_10x10_data, avg_filter_10x10_data + 10 * 10));
 
+    CudaImage<float> unsharpen_filter_3x3(3, 3);
+    checkCudaErrors(cudaMalloc(&unsharpen_filter_3x3.data(), unsharpen_filter_3x3.bytesSize()));
+    unsharpen_filter_3x3.setValuesFromVector(std::vector<float>(unsharpen_filter_3x3_data, unsharpen_filter_3x3_data + 3 * 3));
+
     float zeros_5x5[5*5] =  { 0 };
     float sobel_5x5[5*5] =  { 0 };
     // set element [2,0] to 1
@@ -605,10 +614,15 @@ int main(int argc, char **argv) {
     checkCudaErrors(cudaMalloc(&image_fix_filtered.data(), image_fix_filtered.bytesSize()));
     CHANNEL_ACTION actions[CHANNELS] {FILTER};
 
+    CudaImage<uint8_t, CHANNELS> image_mov_filtered(ym, xm);
+    checkCudaErrors(cudaMalloc(&image_mov_filtered.data(), image_mov_filtered.bytesSize()));
+
     // image_fix.filter(delta_filter, image_fix_filtered, actions);
     // image_fix.filter(avg_filter_5x5, image_fix_filtered, actions);
-    image_fix.filter(avg_filter_10x10, image_fix_filtered, actions);
+    // image_fix.filter(avg_filter_10x10, image_fix_filtered, actions);
     // image_fix.filter(sobel_filter_5x5, image_fix_filtered, actions);
+    image_fix.filter(unsharpen_filter_3x3, image_fix_filtered, actions);
+    image_mov.filter(unsharpen_filter_3x3, image_mov_filtered, actions);
 
     if(intensityModifier > 0.0f) {
         dim3 bSize(32,32);
@@ -663,6 +677,36 @@ int main(int argc, char **argv) {
     scaleY = 1;
     float MAX_NONOVERLAPPING_PCT = 0.5f;
 
+    // std::vector<grid_precision> num_samples = {(grid_precision) 32,
+    //                                            (grid_precision) 1,
+    //                                            (grid_precision) 1,
+    //                                            (grid_precision) 1,
+    //                                            (grid_precision) (xf + 1) / (20 * scale_factor_x),
+    //                                            (grid_precision) (yf + 1) / (20 * scale_factor_y),
+    //                                            (grid_precision) 1,
+    //                                            (grid_precision) 1
+    // };
+
+    // std::vector<grid_precision> start_point = {(grid_precision) 0, // theta
+    //                                            (grid_precision) 0.613442, // scaleX
+    //                                            (grid_precision) 0.678426, // scaleY
+    //                                            (grid_precision) -0.4,  // shearXY
+    //                                            (grid_precision) -xm * MAX_NONOVERLAPPING_PCT,  // translateX
+    //                                            (grid_precision) -ym * MAX_NONOVERLAPPING_PCT,  // translateY
+    //                                            (grid_precision) 0, // keystoneX
+    //                                            (grid_precision) 0  // keystoneY
+    // };
+
+    // std::vector<grid_precision> end_point = {static_cast<float>((grid_precision) 2 * PI - PI / num_samples[0]),
+    //                                          (grid_precision) 0.613442,
+    //                                          (grid_precision) 0.678426,
+    //                                          (grid_precision) -0.4,
+    //                                          (grid_precision) xf - xm * MAX_NONOVERLAPPING_PCT,
+    //                                          (grid_precision) yf - ym * MAX_NONOVERLAPPING_PCT,
+    //                                          (grid_precision) 0,
+    //                                          (grid_precision) 0
+    // };
+
     std::vector<grid_precision> num_samples = {(grid_precision) 32,
                                                (grid_precision) 16,
                                                (grid_precision) 16,
@@ -692,6 +736,7 @@ int main(int argc, char **argv) {
                                              (grid_precision) 0,
                                              (grid_precision) 0
     };
+
 
     outfile << "start_point,";
     for (int i = 0; i < grid_dimension; i++) outfile << start_point[i] << ",";
@@ -730,10 +775,14 @@ int main(int argc, char **argv) {
         cudaMemcpyFromSymbol(&host_func_byval_ptr, dev_func_byvalue_ptr,
                              sizeof(image_err_func_byvalue));
 
-        //translation_xy_gridsearcher.search(host_func_byval_ptr, m1, m2);
-        translation_xy_gridsearcher.search_by_value(host_func_byval_ptr, image_mov, image_fix);
+        // translation_xy_gridsearcher.search(host_func_byval_ptr, m1, m2);
+        // translation_xy_gridsearcher.search_by_value(host_func_byval_ptr, image_mov, image_fix);
         // translation_xy_gridsearcher.search_by_value_stream(host_func_byval_ptr, 10000, 1, image_mov, image_fix);
         // translation_xy_gridsearcher.search_by_value_stream(host_func_byval_ptr, 10000, image_fix.height(), image_mov, image_fix);
+
+        // translation_xy_gridsearcher.search_by_value(host_func_byval_ptr, image_mov, image_fix_filtered);
+        translation_xy_gridsearcher.search_by_value(host_func_byval_ptr, image_mov_filtered, image_fix);
+        // translation_xy_gridsearcher.search_by_value(host_func_byval_ptr, image_mov_filtered, image_fix_filtered);
 
         //    func_values.display();
 
@@ -760,42 +809,76 @@ int main(int argc, char **argv) {
     std::chrono::duration<double> elapsed_seconds = end - start;
     printf("Total Time Taken: %f\n", elapsed_seconds.count());
 
-    outfile << "Total Time," << elapsed_seconds.count() << ",";
+    // outfile << "Total Time," << elapsed_seconds.count() << ",";
 
-    outfile << "MinParams,";
-    for (int i = 0; i < grid_dimension; i++) outfile << minParams[i] << ",";
+    // outfile << "MinParams,";
+    // for (int i = 0; i < grid_dimension; i++) outfile << minParams[i] << ",";
 
     // Covariance calculation
     grid_precision *covar_matrix = new grid_precision[(grid_dimension)*(grid_dimension)];
     num_samples = {(grid_precision) 5,
-                    (grid_precision) 5,
-                    (grid_precision) 5,
-                    (grid_precision) 5,
+                    (grid_precision) 1,
+                    (grid_precision) 1,
+                    (grid_precision) 1,
                     (grid_precision) 5,
                     (grid_precision) 5,
                     (grid_precision) 1,
                     (grid_precision) 1
     };
 
-    start_point = {static_cast<float>((grid_precision) minParams[0] - 3 * PI / 32), // theta
-                                               (grid_precision) (minParams[1] - 1.0f), // scaleX
-                                               (grid_precision) (minParams[2] - 1.0f), // scaleY
-                                               (grid_precision) (minParams[3] - 0.05),  // shearXY
-                                               (grid_precision) (minParams[4] - 5.0f),  // translateX
-                                               (grid_precision) (minParams[5] - 5.0f),  // translateY
+    // // DEBUG
+    // // float tempTemp_minParams[] = { 3.39178, 0.613442, 0.678426, -0.4, -0.439846, 5.22039, 0, 0 };
+    // // for (int i = 0; i < grid_dimension; i++) minParams[i] = tempTemp_minParams[i];
+
+    start_point = {static_cast<float>((grid_precision) minParams[0] - 1.0f * PI / 64.0f), // theta
+                                               (grid_precision) (minParams[1]), // - 0.5f), // scaleX
+                                               (grid_precision) (minParams[2]), // - 0.5f), // scaleY
+                                               (grid_precision) (minParams[3]), // - 0.05),  // shearXY
+                                               (grid_precision) (minParams[4] - 2.5f),  // translateX
+                                               (grid_precision) (minParams[5] - 2.5f),  // translateY
                                                (grid_precision) 0, // keystoneX
                                                (grid_precision) 0  // keystoneY
     };
 
-    end_point = {static_cast<float>((grid_precision) minParams[0] + 3 * PI / 32),
-                                             (grid_precision) (minParams[1] + 1.0f),
-                                             (grid_precision) (minParams[2] + 1.0f),
-                                             (grid_precision) (minParams[3] + 0.05),
-                                             (grid_precision) (minParams[4] + 5.0f),
-                                             (grid_precision) (minParams[5] + 5.0f),
+    end_point = {static_cast<float>((grid_precision) minParams[0] + 1.0f * PI / 64.0f),
+                                             (grid_precision) (minParams[1]), // + 0.5f),
+                                             (grid_precision) (minParams[2]), // + 0.5f),
+                                             (grid_precision) (minParams[3]), // + 0.05),
+                                             (grid_precision) (minParams[4] + 2.5f),
+                                             (grid_precision) (minParams[5] + 2.5f),
                                              (grid_precision) 0,
                                              (grid_precision) 0
     };
+
+    // num_samples = {(grid_precision) 5,
+    //                 (grid_precision) 5,
+    //                 (grid_precision) 5,
+    //                 (grid_precision) 5,
+    //                 (grid_precision) 5,
+    //                 (grid_precision) 5,
+    //                 (grid_precision) 1,
+    //                 (grid_precision) 1
+    // };
+
+    // start_point = {static_cast<float>((grid_precision) minParams[0] - 3 * PI / 32), // theta
+    //                                            (grid_precision) (minParams[1] - 1.0f), // scaleX
+    //                                            (grid_precision) (minParams[2] - 1.0f), // scaleY
+    //                                            (grid_precision) (minParams[3] - 0.05),  // shearXY
+    //                                            (grid_precision) (minParams[4] - 5.0f),  // translateX
+    //                                            (grid_precision) (minParams[5] - 5.0f),  // translateY
+    //                                            (grid_precision) 0, // keystoneX
+    //                                            (grid_precision) 0  // keystoneY
+    // };
+
+    // end_point = {static_cast<float>((grid_precision) minParams[0] + 3 * PI / 32),
+    //                                          (grid_precision) (minParams[1] + 1.0f),
+    //                                          (grid_precision) (minParams[2] + 1.0f),
+    //                                          (grid_precision) (minParams[3] + 0.05),
+    //                                          (grid_precision) (minParams[4] + 5.0f),
+    //                                          (grid_precision) (minParams[5] + 5.0f),
+    //                                          (grid_precision) 0,
+    //                                          (grid_precision) 0
+    // };
 
     {
         CudaGrid<grid_precision, grid_dimension> translation_xy_grid;
@@ -825,12 +908,15 @@ int main(int argc, char **argv) {
                              sizeof(image_err_func_byvalue));
 
         //translation_xy_gridsearcher.search(host_func_byval_ptr, m1, m2);
-        translation_xy_gridsearcher.search_by_value(host_func_byval_ptr, image_mov, image_fix);
+        // translation_xy_gridsearcher.search_by_value(host_func_byval_ptr, image_mov, image_fix);
         // translation_xy_gridsearcher.search_by_value_stream(host_func_byval_ptr, 10000, 1, image_mov, image_fix);
         // translation_xy_gridsearcher.search_by_value_stream(host_func_byval_ptr, 10000, image_fix.height(), image_mov, image_fix);
 
         // func_values.display();
 
+        // translation_xy_gridsearcher.search_by_value(host_func_byval_ptr, image_mov, image_fix_filtered);
+        translation_xy_gridsearcher.search_by_value(host_func_byval_ptr, image_mov_filtered, image_fix);
+        // translation_xy_gridsearcher.search_by_value(host_func_byval_ptr, image_mov_filtered, image_fix_filtered);
         
         for(int i = 0; i < (grid_dimension)*(grid_dimension); i++) {
             covar_matrix[i] = 0;
@@ -987,7 +1073,7 @@ int main(int argc, char **argv) {
     writeTransformedImageToDisk_local<uint8_t, CHANNELS>(image_mov, yf, xf, H, img_out_filename);
 
     // Write aligned and fused output image to disk
-    writeAlignedAndFusedImageToDisk_local<uint8_t, CHANNELS>(image_fix, image_mov, H, gtH, img_fused_filename);
+    writeAlignedAndFusedImageToDisk_local<uint8_t, CHANNELS>(image_fix_filtered, image_mov, H, gtH, img_fused_filename);
 
     // Clean memory
     checkCudaErrors(cudaFree(image_fix.data()));

@@ -322,33 +322,31 @@ __global__ void calculateCovariance_by_value(CudaGrid<grid_precision, D> grid,
     int threadIndex = (blockDim.x * blockIdx.x + threadIdx.x);
     if (threadIndex == 0) {
         grid_precision grid_point[D];
-        grid_precision mean_holder[D];
+        grid_precision dlog_fx_dx[D];
         grid_precision x_minus_xmin[D];
         grid_precision fx_total = 0;
 
-        for (int d = 0; d < D+1; d++) {
-            mean_holder[d] = 0;
+        for (int i = 0; i < D; i++) {
+            dlog_fx_dx[i] = 0;
         }
+        int fx_min_idx = 0;
+        func_precision min_val = 0;
         for (int tempIdx = 0; tempIdx < result_size; tempIdx++) {
-            grid.indexToGridPoint(tempIdx, grid_point);
-            for (int d = 0; d < D; d++) {
-                mean_holder[d] += grid_point[d];
-            }
             fx_total += *(result+tempIdx);
+            if (*(result+tempIdx) < min_val) {
+                min_val = *(result+tempIdx);
+                fx_min_idx = tempIdx;
+            }
         }
-        for (int d = 0; d < D; d++) {
-            mean_holder[d] /= ((grid_precision)result_size);
-        }
-
+        
         grid_precision x_min[D];
-        grid.indexToGridPoint(result_size/2, x_min);
-        func_precision min_val = *(result + result_size/2);
+        grid.indexToGridPoint(fx_min_idx, x_min);
         for (int tempIdx = 0; tempIdx < result_size; tempIdx++) {
-        	if (tempIdx == result_size /2) continue;
+        	if (tempIdx == (fx_min_idx)) continue;
         	
         	grid.indexToGridPoint(tempIdx, grid_point);
         	grid_precision f_x = *(result+tempIdx);
-
+            if (f_x == 0) f_x = -1e-9;
 
         	for(int d = 0; d < D; d++) {
                 x_minus_xmin[d] = grid_point[d] - x_min[d];
@@ -358,12 +356,15 @@ __global__ void calculateCovariance_by_value(CudaGrid<grid_precision, D> grid,
             	length += x_minus_xmin[d] * x_minus_xmin[d];
             }
             length = sqrt(length);
-            float slope = log((*(result+tempIdx) - min_val) / (fx_total)) * ( 1 / length);
+            float slope = ( log(abs(min_val)) - log(abs(f_x)) ) * (1 / length);
+            
+            // printf("%d: Length = %f\n", tempIdx, length);
 
             if (slope < 0) continue;
 
+
             for(int d = 0; d < D; d++) {
-                x_minus_xmin[d] *= slope/length;
+                dlog_fx_dx[d] = x_minus_xmin[d] * slope/length;
             }
             for (int covarIdx = 0; covarIdx < (D) * (D); covarIdx++) {
                 
@@ -390,15 +391,15 @@ __global__ void calculateCovariance_by_value(CudaGrid<grid_precision, D> grid,
                 // }
                 // covar[covarIdx] += A * B;
                 
-                covar[covarIdx] += x_minus_xmin[row] * x_minus_xmin[col];
+                covar[covarIdx] += dlog_fx_dx[row] * dlog_fx_dx[col];
             }
             // covar[covarIdx] /= ((grid_precision)(result_size-1));
             // printf("covarIdx %d = %e\n", covarIdx, covar[covarIdx]);
         }
 
-        for (int covarIdx = 0; covarIdx < (D) * (D); covarIdx++) {
-            covar[covarIdx] /= fx_total;
-        }
+        // for (int covarIdx = 0; covarIdx < (D) * (D); covarIdx++) {
+        //     covar[covarIdx] /= fx_total;
+        // }
 
         // printf("Results = [");
         // for (int tempIdx = 0; tempIdx < result_size; tempIdx++) {
