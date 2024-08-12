@@ -39,7 +39,7 @@
 #include <nvVectorNd.h>
 #include <chrono>
 
-#include "helper_functions.h"
+//#include "helper_functions.h"
 #include "helper_cuda.h"
 
 #include "cudaTensor.cuh"
@@ -315,6 +315,17 @@ __global__ void evaluationKernel_by_value(CudaGrid<grid_precision, D> grid,
 
 // TODO: Get the raw values from the GPU and print it to send it to MATLAB or something that can do Fisher Information Matrix
 template<typename func_precision, typename grid_precision, unsigned int D>
+__global__ void set_grid_func_value_kernel(CudaGrid<grid_precision, D> grid,
+                                          func_precision *result,
+                                          uint32_t result_size,
+                                          uint32_t index,
+                                          func_precision new_value) {
+    int threadIndex = (blockDim.x * blockIdx.x + threadIdx.x);
+    if (threadIndex == 0) {
+        *(result+index) = new_value;
+    }
+}
+template<typename func_precision, typename grid_precision, unsigned int D>
 __global__ void calculateCovariance_by_value(CudaGrid<grid_precision, D> grid,
                                           func_precision *result,
                                           uint32_t result_size,
@@ -325,6 +336,14 @@ __global__ void calculateCovariance_by_value(CudaGrid<grid_precision, D> grid,
         grid_precision dlog_fx_dx[D];
         grid_precision x_minus_xmin[D];
         grid_precision fx_total = 0;
+
+        // for (int tempIdx = 0; tempIdx < result_size; tempIdx++) {
+        //     grid.indexToGridPoint(tempIdx, grid_point);
+        //     for(int d = 0; d < D; d++) {
+        //         printf("%f ", grid_point[d]);
+        //     }
+        //     printf("%f\n", *(result+tempIdx));
+        // }
 
         for (int i = 0; i < D; i++) {
             dlog_fx_dx[i] = 0;
@@ -764,7 +783,17 @@ struct CudaGridSearcher {
         printf("Time Taken: %f\n", elapsed_seconds.count());
     }
     // this will search a function with by-value arguments
+template<typename ... Types>
+    void set_grid_func_value(uint32_t index, func_precision new_value) {
+        std::vector<grid_precision> point(_grid->getDimension(), 0);
+        uint32_t total_samples = _grid->numElements();
+        // compute 1D search grid, block and thread index pattern
+        dim3 gridDim(1, 1, 1), blockDim(1, 1, 1);
 
+        set_grid_func_value_kernel<<< gridDim, blockDim>>>(*_grid, (*_result).data(), total_samples, index, new_value);
+        gpuErrchk(cudaPeekAtLastError());
+        gpuErrchk(cudaDeviceSynchronize());
+}
 template<typename ... Types>
     void covariance_by_value(grid_precision *covar_matrix) {
 
